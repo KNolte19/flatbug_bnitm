@@ -1573,15 +1573,19 @@ class Predictor(object):
             raise TypeError(f"Unknown type for image: {type(image)}, expected str or torch.Tensor")
 
         c, h, w = image.shape
+
         transform_list = []
-        # Check if the image has an integer data type
-        if image.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
-            transform_list.append(transforms.ConvertImageDtype(self._dtype))
+
 
         if scale_before != 1:
             w, h = int(w * scale_before), int(h * scale_before)
             resize = transforms.Resize((h, w), antialias=True)
             transform_list.append(resize)
+
+        # Check if the image has an integer data type
+        if image.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+            transform_list.append(transforms.ConvertImageDtype(self._dtype))
+
 
         # A border is always added now, to avoid edge-cases on the actual edge of the image. I.e. only detections on internal edges of tiles should be removed, not detections on the edge of the image.
         edge_case_margin_padding_multiplier = 2
@@ -1598,8 +1602,11 @@ class Predictor(object):
             padding_offset[:] = 0
         if transform_list:
             transforms_composed = transforms.Compose(transform_list)
-
-        transformed_image = transforms_composed(image) if transform_list else image
+            device = image.device
+            transformed_image = transforms_composed(image.to("cpu"))
+            transformed_image = transformed_image.to(device,  dtype=self._dtype)
+        else:
+            transformed_image = image
 
         # Check correct dimensions
         assert len(transformed_image.shape) == 3, RuntimeError(f"transformed_image.shape {transformed_image.shape} != 3") 
