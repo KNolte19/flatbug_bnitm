@@ -7,9 +7,10 @@
 # # SBATCH -t 96:00:00 
 
 CONFIG=fb_config_M40S_GHPC.yaml
-#ROOT=/home/altair/flat-bug
+ROOT=/home/quentin/Desktop/flat-bug/
+NAME=fb_M_$(date +"%Y-%m-%d_%H-%M-%S")
 # source ${ROOT}/.venv/bin/activate
-fb_clone_data -s secrets.yaml -o ${ROOT}/flat-bug-data/pre-pro/
-fb_prepare_data -i ${ROOT}/flat-bug-data/pre-pro/  -o ${ROOT}/flat-bug-data/yolo/ -f
-fb_train -c ${ROOT}/scripts/training/${CONFIG} -d ${ROOT}/flat-bug-data/yolo/
+#fb_clone_data -s .secrets.yaml -o ${ROOT}/flat-bug-data/pre-pro/
+#fb_prepare_data -i ${ROOT}/flat-bug-data/pre-pro/  -o ${ROOT}/flat-bug-data/yolo/ -f
+fb_train -c ${CONFIG} -d ${ROOT}/flat-bug-data/yolo/ --name ${NAME}
 
