@@ -375,7 +375,7 @@ def main():
 
     TARGET_DIR = Path(option_dict["output_dir"])
     SECRETS = load_secrets_yaml(option_dict["secrets_file"])
-
+    assert SECRETS, f"Failed to load secrets {option_dict["secrets_file"]}"
     CVAT_CFG = SECRETS["cvat"]
     S3_CFG = SECRETS["s3"]
 
