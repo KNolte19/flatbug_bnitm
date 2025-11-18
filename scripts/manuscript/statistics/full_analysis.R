@@ -25,7 +25,7 @@ reset_dev <- function() {
 }
 
 main <- function() {
-  pb <- progressr::progressor(steps = 8 + do_recompute, auto_finish = F)
+  pb <- progressr::progressor(steps = 9 + do_recompute, auto_finish = F)
   
   pb("Setting up environment...", amount=0)
   options(full_analysis_running = T)
@@ -63,12 +63,16 @@ main <- function() {
   execute_script("leave_two_out.R", !dry_run)
   pb()
   
-  pb("Creating appendix figures (1/2)...", amount=0)
+  pb("Creating appendix figures (1/3)...", amount=0)
   execute_script("justify_cutoff32.R", !dry_run)
   pb()
   
-  pb("Creating appendix figures (2/2)...", amount=0)
+  pb("Creating appendix figures (2/3)...", amount=0)
   execute_script("ap_curve.R", !dry_run)
+  pb()
+  
+  pb("Creating appendix figures (3/3)...", amount=0)
+  execute_script("confidence_iou_relationship.R", !dry_run)
   pb()
   
   reset_dev()
