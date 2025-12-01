@@ -271,7 +271,7 @@ percent_max_to_bold_min_to_italic <- function(x, exclude=NULL) {
 
 section_reference <- "\\sref{sec:res_exp2}"
 
-leave_one_out_cleaned %>% 
+leave_one_out_latex <- leave_one_out_cleaned %>% 
   select(short, type, metric, rel_delta) %>% 
   transmute(
     short,
@@ -330,6 +330,7 @@ leave_one_out_cleaned %>%
   ) %>% 
   str_split_1("\n") %>% 
   {
+    .[1] <- paste0(.[1], "[htb]")
     .[2] <- "\\centering"
     .
   } %>% 
@@ -341,6 +342,7 @@ leave_one_out_cleaned %>%
   {
     c(.[1:(length(.)-1)], "\\label{tab:leave_one_out_tab}", .[length(.)])
   } %>% 
-  paste0(collapse = "\n") %>% 
-  clipr::write_clip()
+  paste0(collapse = "\n")
 
+add_group("Experiment 2 - Leave-one-out table")
+write_data("Experiment 2 - Leave-one-out table", latex_env2macro(leave_one_out_latex, "LeaveOneOutTable"))

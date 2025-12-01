@@ -253,6 +253,20 @@ plot_matrix <- function(mat, limits=nice_limits, title=NULL, text=F) {
 
 
 ## Latex data management
+latex_minimize <- function(ltx) stringr::str_split_1(ltx, "\n") %>%
+  stringr::str_squish() %>% 
+  magrittr::extract(nchar(.) > 0) %>% 
+  paste0(collapse = "\n")
+
+latex_env2macro <- function(ltx, name) {
+  ltx <- latex_minimize(ltx)
+  stringr::str_glue(
+    "\\providecommand{{\\{name}}}{{}}%\n",
+    "\\renewcommand{{\\{name}}}{{%\n{ltx}\n}%"
+  )
+}
+
+
 start_pattern <- "% ### <NAME> ###"
 end_pattern   <- "% ### </NAME> ###"
 

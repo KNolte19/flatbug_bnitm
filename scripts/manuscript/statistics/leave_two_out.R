@@ -160,8 +160,10 @@ focal_subdatasets_latex <- tibble(
 add_group("Experiment 3 - Subdatasets")
 write_data("Experiment 3 - Subdatasets", focal_subdatasets_latex)
 
-library(tidygraph)
-library(ggraph)
+suppressPackageStartupMessages({
+  library(tidygraph)
+  library(ggraph)
+})
 
 # owr = one-way redundance
 owr_dist <- focal_matrix_F1

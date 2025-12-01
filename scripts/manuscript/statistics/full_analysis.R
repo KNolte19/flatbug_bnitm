@@ -7,7 +7,9 @@ do_recompute <- FALSE
 dry_run      <- FALSE 
 
 #######################################################
-library(progressr)
+suppressPackageStartupMessages({
+  library(progressr)
+})
 
 handlers(global=T)
 handlers(handler_pbcol(
@@ -25,7 +27,7 @@ reset_dev <- function() {
 }
 
 main <- function() {
-  pb <- progressr::progressor(steps = 9 + do_recompute, auto_finish = F)
+  pb <- progressr::progressor(steps = 10 + do_recompute, auto_finish = F)
   
   pb("Setting up environment...", amount=0)
   options(full_analysis_running = T)
@@ -73,6 +75,10 @@ main <- function() {
   
   pb("Creating appendix figures (3/3)...", amount=0)
   execute_script("confidence_iou_relationship.R", !dry_run)
+  pb()
+  
+  pb("Creating appendix tables (1/1)...", amount=0)
+  execute_script("metric_table.R", !dry_run)
   pb()
   
   reset_dev()
