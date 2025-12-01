@@ -63,7 +63,7 @@ row_index <- metrics_combined$metric %>%
   set_names(unique(metrics_combined$metric))
 
 quantiles_latex <- paste0(names(nice_colnames)[3:7], collapse=", ")
-section_reference <- "\\fref{sec:res_exp1}"
+section_reference <- "\\sref{sec:res_exp1}"
 
 do.call(rename, c(list(metrics_combined), as.list(nice_colnames))) %>% 
   group_by(Metric) %>% 
@@ -115,7 +115,7 @@ do.call(rename, c(list(metrics_combined), as.list(nice_colnames))) %>%
   } %>% 
   {
     reord <- .[!str_detect(., "caption\\{")]
-    e3pt <- which(str_detect(reord, "begin\\{tablenotes\\}"))
+    e3pt <- which(str_detect(reord, "end\\{threeparttable\\}")) + 1
     c(reord[1:(e3pt-1)], .[str_detect(., "caption\\{")], reord[e3pt:length(reord)])
   } %>% 
   {

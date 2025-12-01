@@ -227,7 +227,12 @@ plot_matrix <- function(mat, limits=nice_limits, title=NULL, text=F) {
   p <- d %>% 
     ggplot(aes(left, right, fill = rel_delta)) +
     geom_raster() +
-    scale_fill_flatbug_c(palette = "RdWiBu", limits = limits, expand = expansion()) +
+    scale_fill_flatbug_c(
+      palette = "RdWiBu",
+      labels = scales::percent_format(),
+      limits = limits,
+      expand = expansion()
+    ) +
     coord_equal(expand = F) +
     labs(x = NULL, y = NULL, title = title) +
     theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90))
@@ -235,8 +240,8 @@ plot_matrix <- function(mat, limits=nice_limits, title=NULL, text=F) {
   if (text) {
     p <- p +
       geom_text(
-        aes(label = str_remove(scales::label_percent(1)(rel_delta), "%")), 
-        size = 2,
+        aes(label = str_remove(scales::label_percent(.1)(rel_delta), "%")), 
+        size = 5.5,
         hjust = 0.5, 
         fontface = "bold", 
         family = "CMU Serif"
