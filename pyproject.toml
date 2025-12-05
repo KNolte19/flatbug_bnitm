@@ -29,7 +29,10 @@ keywords=['deep learning', 'object detection', 'instance segmentation', 'arthrop
 erda = [
     "pyremotedata>=0.0.16"
 ]
-
+cloud_datasets = [
+    "boto3>=1.40",
+    "cvat_sdk>=2.47"
+]
 jupyter = [
     "jupyter>=1.0.0"
 ]
@@ -45,3 +48,4 @@ fb_train = "bin.fb_train:main"
 fb_evaluate = "bin.fb_eval:main"
 fb_tune = "bin.fb_tune:main"
 fb_prepare_data = "bin.fb_prepare_data:main"
+fb_clone_data = "bin.fb_clone_data:main"
