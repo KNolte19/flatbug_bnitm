@@ -227,12 +227,7 @@ plot_matrix <- function(mat, limits=nice_limits, title=NULL, text=F) {
   p <- d %>% 
     ggplot(aes(left, right, fill = rel_delta)) +
     geom_raster() +
-    scale_fill_flatbug_c(
-      palette = "RdWiBu",
-      labels = scales::percent_format(),
-      limits = limits,
-      expand = expansion()
-    ) +
+    scale_fill_flatbug_c(palette = "RdWiBu", limits = limits, expand = expansion()) +
     coord_equal(expand = F) +
     labs(x = NULL, y = NULL, title = title) +
     theme(axis.text.x = element_text(hjust = 1, vjust = 0.5, angle = 90))
@@ -240,8 +235,8 @@ plot_matrix <- function(mat, limits=nice_limits, title=NULL, text=F) {
   if (text) {
     p <- p +
       geom_text(
-        aes(label = str_remove(scales::label_percent(.1)(rel_delta), "%")), 
-        size = 5.5,
+        aes(label = str_remove(scales::label_percent(1)(rel_delta), "%")), 
+        size = 2,
         hjust = 0.5, 
         fontface = "bold", 
         family = "CMU Serif"
@@ -253,20 +248,6 @@ plot_matrix <- function(mat, limits=nice_limits, title=NULL, text=F) {
 
 
 ## Latex data management
-latex_minimize <- function(ltx) stringr::str_split_1(ltx, "\n") %>%
-  stringr::str_squish() %>% 
-  magrittr::extract(nchar(.) > 0) %>% 
-  paste0(collapse = "\n")
-
-latex_env2macro <- function(ltx, name) {
-  ltx <- latex_minimize(ltx)
-  stringr::str_glue(
-    "\\providecommand{{\\{name}}}{{}}%\n",
-    "\\renewcommand{{\\{name}}}{{%\n{ltx}\n}%"
-  )
-}
-
-
 start_pattern <- "% ### <NAME> ###"
 end_pattern   <- "% ### </NAME> ###"
 
