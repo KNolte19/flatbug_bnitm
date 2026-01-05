@@ -14,7 +14,7 @@ import torchvision
 import torchvision.transforms as transforms
 from PIL import Image
 from torch._prims_common import DeviceLikeType
-from torchvision.io import ImageReadMode, read_image
+from torchvision.io import ImageReadMode, decode_image
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
 
@@ -1562,20 +1562,19 @@ class Predictor(object):
 
         if isinstance(image, str):
             path : str = image
-            image : torch.Tensor = read_image(
+            image : torch.Tensor = decode_image(
                 path=image, 
                 mode=ImageReadMode.RGB, 
                 apply_exif_orientation=True
-            ).to(self._device)
+            )
         elif isinstance(image, torch.Tensor):
+            image = image.cpu()
             logger.debug("Input image source file not specified for prediction, saving the prediction will require specifying the source file basename.")
         else:
             raise TypeError(f"Unknown type for image: {type(image)}, expected str or torch.Tensor")
 
         c, h, w = image.shape
-
         transform_list = []
-
 
         if scale_before != 1:
             w, h = int(w * scale_before), int(h * scale_before)
@@ -1585,7 +1584,6 @@ class Predictor(object):
         # Check if the image has an integer data type
         if image.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
             transform_list.append(transforms.ConvertImageDtype(self._dtype))
-
 
         # A border is always added now, to avoid edge-cases on the actual edge of the image. I.e. only detections on internal edges of tiles should be removed, not detections on the edge of the image.
         edge_case_margin_padding_multiplier = 2
@@ -1600,13 +1598,10 @@ class Predictor(object):
             transform_list.append(padding_for_edge_cases)
         else:
             padding_offset[:] = 0
-        if transform_list:
-            transforms_composed = transforms.Compose(transform_list)
-            device = image.device
-            transformed_image = transforms_composed(image.to("cpu"))
-            transformed_image = transformed_image.to(device,  dtype=self._dtype)
-        else:
-            transformed_image = image
+        
+        transformed_image = (
+            transforms.Compose(transform_list)(image) if transform_list else image
+        ).to(device=self._device,  dtype=self._dtype)
 
         # Check correct dimensions
         assert len(transformed_image.shape) == 3, RuntimeError(f"transformed_image.shape {transformed_image.shape} != 3") 
