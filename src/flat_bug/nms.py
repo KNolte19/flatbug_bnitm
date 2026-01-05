@@ -39,7 +39,7 @@ def iou_boxes(
 
 # Check if 'fmt' is an argument in the current version of torchvision
 try:
-    torchvision.ops.boxes._box_inter_union(torch.empty((1,)), torch.empty((1,)), fmt="xyxy")
+    torchvision.ops.boxes._box_inter_union(torch.empty((0,4)), torch.empty((0,4)), fmt="xyxy")
     _box_inter_union = partial(torchvision.ops.boxes._box_inter_union, fmt="xyxy")
 except TypeError:
     _box_inter_union = torchvision.ops.boxes._box_inter_union
