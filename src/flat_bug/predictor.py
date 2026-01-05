@@ -25,7 +25,7 @@ from flat_bug.geometric import (calculate_tile_offsets, chw2hwc_uint8,
                                 contours_to_masks, create_contour_mask,
                                 find_contours, poly_area, scale_contour,
                                 simplify_contour)
-from flat_bug.nms import detect_duplicate_boxes, nms_masks, nms_polygons
+from flat_bug.nms import detect_duplicate_boxes, nms_masks, nms_polygons, get_overlap_fn
 from flat_bug.yolo_helpers import (ResultsWithTiles, merge_tile_results,
                                    offset_box, postprocess, resize_mask,
                                    stack_masks)
@@ -329,7 +329,8 @@ class TensorPredictions:
 
     def non_max_suppression(
             self, 
-            iou_threshold : float, 
+            overlap_threshold : float, 
+            metric : str,
             **kwargs
         ) -> Self:
         """
@@ -342,6 +343,8 @@ class TensorPredictions:
             start.record()
             len_before = len(self)
 
+        metric = metric.strip().lower()
+
         # Skip if there are no instances to remove
         if len(self) > 1:
             # Perform non-maximum suppression on the polygons or masks
@@ -349,7 +352,8 @@ class TensorPredictions:
                 nms_ind = nms_polygons(
                     polygons=self.polygons,
                     scores=self.confs,# * torch.tensor(self.scales, dtype=self.dtype, device=self.device),
-                    iou_threshold=iou_threshold, 
+                    overlap_threshold=overlap_threshold, 
+                    overlap_fn=metric,
                     return_indices=True, 
                     boxes=self.boxes, 
                     **kwargs
@@ -362,7 +366,8 @@ class TensorPredictions:
                 nms_ind : torch.Tensor = nms_masks(
                     masks=self.masks.data,
                     scores=self.confs,# * torch.tensor(self.scales, dtype=self.dtype, device=self.device),
-                    iou_threshold=iou_threshold, 
+                    overlap_threshold=overlap_threshold, 
+                    overlap_fn=metric,
                     return_indices=True,
                     boxes=self.boxes / image_to_mask_scale.repeat(2).unsqueeze(0), 
                     **kwargs
@@ -1206,9 +1211,9 @@ class Predictor(object):
     The score threshold for the predictions. \\
     TODO: This should be called CONFIDENCE_THRESHOLD.
     """
-    IOU_THRESHOLD: float = None
+    OVERLAP_THRESHOLD: float = None
     """
-    The IOU threshold used to determine if two instances are duplicates. \\
+    The overlap (e.g. IOU) threshold used to determine if two instances are duplicates. \\
     """
     MINIMUM_TILE_OVERLAP : int = None
     """
@@ -1233,6 +1238,10 @@ class Predictor(object):
     Enables an experimental optimization for the NMS step. \\
     This optimization improves the performance of the NMS step when there are \\
     many instances in a large image and CUDA is available.
+    """
+    OVERLAP_METRIC : str = None
+    """
+    Metric to use for NMS. One of "IOU" or "IOS", more might be added in the future.
     """
     TIME : bool = None
     """
@@ -1262,11 +1271,8 @@ class Predictor(object):
             device : Union[str, torch.device, int, List[Union[str, torch.device, int]]]=torch.device("cpu"), 
             dtype : Union[torch.types._dtype, str]=torch.float32
         ):
-        if cfg is None:
-            cfg = DEFAULT_CFG
-        if isinstance(cfg, (str, os.PathLike)):
-            cfg = read_cfg(cfg, strict=True)
-        self.set_hyperparameters(**cfg)
+        cfg = read_cfg(cfg, strict=True) if isinstance(cfg, (str, os.PathLike)) else (cfg or {})
+        self.set_hyperparameters(**{**DEFAULT_CFG, **cfg})
 
         self._multi_gpu = isinstance(device, (list, tuple))
         self._devices = [torch.device(device)] if not self._multi_gpu else [torch.device(d) for d in device]
@@ -1393,7 +1399,8 @@ class Predictor(object):
             "tile_size" : TILE_SIZE,
             "edge_case_margin" : this_EDGE_CASE_MARGIN,
             "score_threshold" : self.SCORE_THRESHOLD,
-            "iou_threshold" : self.IOU_THRESHOLD,
+            "overlap_threshold" : self.OVERLAP_THRESHOLD,
+            "overlap_metric" : self.OVERLAP_METRIC,
             "min_max_object_size" : this_MIN_MAX_OBJ_SIZE,
             "time" : self.TIME
         }
@@ -1425,7 +1432,8 @@ class Predictor(object):
                     imgs = batch,
                     max_det = 1000,
                     min_confidence = self.SCORE_THRESHOLD,
-                    iou_threshold = self.IOU_THRESHOLD,
+                    overlap_threshold = self.OVERLAP_THRESHOLD,
+                    overlap_metric = self.OVERLAP_METRIC,
                     nms = 3,
                     valid_size_range = self.MIN_MAX_OBJ_SIZE,
                     edge_margin = self.EDGE_CASE_MARGIN,
@@ -1449,7 +1457,6 @@ class Predictor(object):
             total_batch_time = sum(batch_times) + postprocess_time
             overhead_prop = (total_elapsed - total_batch_time) / total_elapsed
             fetch_prop, forward_prop, postprocess_prop = fetch_time / total_batch_time, forward_time / total_batch_time, postprocess_time / total_batch_time
-
         # DEBUG #####
         # if self.DEBUG:
         #     logger.info(f'Number of tiles processed before merging and plotting: {len(postprocessed_results)}')
@@ -1650,13 +1657,13 @@ class Predictor(object):
             time            = self.TIME,
             PREFER_POLYGONS = self.PREFER_POLYGONS
         ).offset_scale_pad(
-            offset  = -padding_offset,
-            scale   = 1 / scale_before,
-            pad     = 5  # pad the boxes a bit to ensure they encapsulate the masks
+            offset = -padding_offset,
+            scale  = 1 / scale_before,
+            pad    = 5 # pad the boxes a bit to ensure they encapsulate the masks
         ).non_max_suppression(
-            iou_threshold   = self.IOU_THRESHOLD,
-            # metric        = 'IoU', # Currently only IoU is supported and setting this will raise an error
-            group_first     = self.EXPERIMENTAL_NMS_OPTIMIZATION
+            overlap_threshold = self.OVERLAP_THRESHOLD,
+            metric        = self.OVERLAP_METRIC,
+            group_first   = self.EXPERIMENTAL_NMS_OPTIMIZATION
         )
 
         if self.TIME:

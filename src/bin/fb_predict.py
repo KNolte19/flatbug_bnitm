@@ -72,6 +72,7 @@ def cli_args():
     args_parse.add_argument("-s", "--scale-before", type=float, dest="scale_before", default=1.0,
                             help="Downscale the image before detection, but crops from the original image.")
     args_parse.add_argument("--single-scale", action="store_true", help="Use single scale.")
+    args_parse.add_argument("-M", "--nms_metric", type=str, default=None, help="Overlap metric to use for NMS, if specified this will override the config. Default is 'IoU', currently only 'IoS' is also available.")
     args_parse.add_argument("-g", "--gpu", type=str, default="cuda:0", help="Which device to use for inference. Default is 'cuda:0', i.e. the first GPU.")
     args_parse.add_argument("-d", "--dtype", type=str, default="float16", help="Which dtype to use for inference. Default is 'float16'.")
     args_parse.add_argument("-f", "--fast", action="store_true", help="Use fast mode.")
@@ -97,6 +98,7 @@ def predict(
         recursive : bool=False,
         scale_before : float=1.0,
         single_scale : bool=False,
+        nms_metric : str="IoU",
         gpu : str="cuda:0",
         dtype : str="float16",
         fast : bool=False,
@@ -153,6 +155,9 @@ def predict(
         config = read_cfg(config)
     else:
         config = DEFAULT_CFG
+    if nms_metric is not None:
+        config["OVERLAP_METRIC"] = nms_metric
+    
     
     crops = not no_crops
     metadata = not no_metadata
