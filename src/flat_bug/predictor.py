@@ -1271,11 +1271,8 @@ class Predictor(object):
             device : Union[str, torch.device, int, List[Union[str, torch.device, int]]]=torch.device("cpu"), 
             dtype : Union[torch.types._dtype, str]=torch.float32
         ):
-        if cfg is None:
-            cfg = DEFAULT_CFG
-        if isinstance(cfg, (str, os.PathLike)):
-            cfg = read_cfg(cfg, strict=True)
-        self.set_hyperparameters(**cfg)
+        cfg = read_cfg(cfg, strict=True) if isinstance(cfg, (str, os.PathLike)) else (cfg or {})
+        self.set_hyperparameters(**{**DEFAULT_CFG, **cfg})
 
         self._multi_gpu = isinstance(device, (list, tuple))
         self._devices = [torch.device(device)] if not self._multi_gpu else [torch.device(d) for d in device]
@@ -1460,7 +1457,6 @@ class Predictor(object):
             total_batch_time = sum(batch_times) + postprocess_time
             overhead_prop = (total_elapsed - total_batch_time) / total_elapsed
             fetch_prop, forward_prop, postprocess_prop = fetch_time / total_batch_time, forward_time / total_batch_time, postprocess_time / total_batch_time
-
         # DEBUG #####
         # if self.DEBUG:
         #     logger.info(f'Number of tiles processed before merging and plotting: {len(postprocessed_results)}')
