@@ -252,10 +252,10 @@ class TensorPredictions:
             end = torch.cuda.Event(enable_timing=True)
             start.record()
 
-        if any(offset > 0):
-            raise NotImplementedError("Positive offsets are not implemented yet")
-
         if len(self) > 0:
+            offset = offset.to(self.device)
+            if any(offset > 0):
+                raise NotImplementedError("Positive offsets are not implemented yet")
             # Boxes is easy
             self.boxes = offset_box(self.boxes, offset)  # Add the offsets to the box-coordinates
             self.boxes[:, :4] = (self.boxes[:, :4] * scale).round()  # Multiply the box-coordinates by the scale factor
@@ -1439,7 +1439,9 @@ class Predictor(object):
                     edge_margin = self.EDGE_CASE_MARGIN,
                 )
                 for batch_index in range(len(this_postprocessed_results)):
-                    postprocessed_results[batch_start_idx + batch_index] = Results(**this_postprocessed_results[batch_index])
+                    tr = Results(**this_postprocessed_results[batch_index])
+                    tr.orig_img = None # Comment this line if we want debug output.
+                    postprocessed_results[batch_start_idx + batch_index] = tr
                 if self.TIME:
                     batch_times.append(timing[0])
                     fetch_times.append(timing[1])
@@ -1570,7 +1572,7 @@ class Predictor(object):
         if isinstance(image, str):
             path : str = image
             image : torch.Tensor = decode_image(
-                path=image, 
+                input=image, 
                 mode=ImageReadMode.RGB, 
                 apply_exif_orientation=True
             )
@@ -1594,7 +1596,7 @@ class Predictor(object):
 
         # A border is always added now, to avoid edge-cases on the actual edge of the image. I.e. only detections on internal edges of tiles should be removed, not detections on the edge of the image.
         edge_case_margin_padding_multiplier = 2
-        padding_offset = torch.tensor((self.EDGE_CASE_MARGIN, self.EDGE_CASE_MARGIN), dtype=self._dtype, device=self._device) * edge_case_margin_padding_multiplier
+        padding_offset = torch.tensor((self.EDGE_CASE_MARGIN, self.EDGE_CASE_MARGIN), dtype=self._dtype) * edge_case_margin_padding_multiplier
         if padding_offset.sum() > 0:
             padding_for_edge_cases = transforms.Pad(
                 padding=self.EDGE_CASE_MARGIN * edge_case_margin_padding_multiplier, 
@@ -1652,7 +1654,7 @@ class Predictor(object):
 
         all_preds = TensorPredictions(
             predictions     = all_preds,
-            image           = image,
+            image           = image.to(self._device),
             image_path      = path,
             dtype           = self._dtype,
             device          = self._device,
