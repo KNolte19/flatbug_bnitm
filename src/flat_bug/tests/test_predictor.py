@@ -11,7 +11,7 @@ import torch
 from torchvision.io import read_image
 
 from flat_bug import logger
-from flat_bug.predictor import Predictor, TensorPredictions
+from flat_bug.predictor import Predictor, TensorPredictions, _executor
 from flat_bug.tests.remote_lfs_fallback import check_file_with_remote_fallback
 
 TEST_MODEL_NAME = "flat_bug_M.pt"
@@ -57,6 +57,7 @@ class TestTensorPredictions(unittest.TestCase):
         tp.image = read_image(image_path) * 255
         with tempfile.TemporaryDirectory() as tmp_directory:
             save_dir = tp.save(tmp_directory, mask_crops=True)
+            _executor.flush()
             self.assertTrue(os.path.exists(os.path.join(save_dir, "crops")))
             crops = glob(os.path.join(save_dir, "crops", "*"))
             n_crops = len(crops)
