@@ -1114,9 +1114,6 @@ class TensorPredictions:
             `str`: The path to the directory containing the serialized data - the crops and overview image(s) are also saved here by default. \\
                 If the standard location is not used at all, the directory is not created and None is returned instead.
         """
-        if not os.path.exists(output_directory):
-            os.makedirs(output_directory)
-
         if basename is None:
             if self.image_path is None:
                 raise ValueError("Unable to save prediction with unknown source file, when `basename` is not supplied.")
@@ -1127,18 +1124,13 @@ class TensorPredictions:
         # Create the prediction directory if it does not exist and it is needed (i.e. if we are saving crops, overview, or metadata to a standard location)
         prediction_directory_is_used = (overview is True) or (crops is True) or (metadata is True)
         if prediction_directory_is_used:
-            if not os.path.exists(prediction_directory):
-                os.makedirs(prediction_directory)
+            os.makedirs(prediction_directory, exist_ok=True)
 
         # Save overview
         if overview:
             # Check if the overview path is overwritten and make sure the directory exists and is a directory
-            if not isinstance(overview, str):
-                overview_directory = prediction_directory
-            else:
-                if not os.path.exists(overview):
-                    os.makedirs(overview)
-                overview_directory = overview
+            overview_directory = overview if isinstance(overview, str) else prediction_directory
+            os.makedirs(overview_directory, exist_ok=True)
             assert os.path.isdir(overview_directory), RuntimeError(f"Invalid path for overview: {overview_directory}")
             # The overview path is then constructed as a .jpg file in the overview directory with the name overview_{base_name}.jpg
             overview_path = os.path.join(overview_directory, f"overview_{basename}_UUID_{identifier}.jpg")
@@ -1153,12 +1145,8 @@ class TensorPredictions:
         # Save crops
         if crops:
             # Check if the crops path is overwritten and make sure the directory exists and is a directory
-            if not isinstance(crops, str):
-                crop_directory = os.path.join(prediction_directory, "crops")
-            else:
-                crop_directory = crops
-            if not os.path.exists(crop_directory):
-                os.makedirs(crop_directory)
+            crop_directory = crops if isinstance(crops, str) else os.path.join(prediction_directory, "crops") 
+            os.makedirs(crop_directory, exist_ok=True)
             assert os.path.isdir(crop_directory), RuntimeError(f"Invalid path for crops: {crop_directory}")
             # Save the crops to the crops path
             _executor.submit(self.save_crops, outdir=crop_directory, basename=basename, mask=mask_crops, identifier=identifier)
@@ -1166,13 +1154,9 @@ class TensorPredictions:
         # Save json
         if metadata:
             # Check if the metadata path is overwritten and make sure the directory exists and is a directory
-            if not isinstance(metadata, str):
-                metadata_directory = prediction_directory
-            else:
-                if not os.path.exists(metadata):
-                    os.makedirs(metadata)
-                metadata_directory = metadata
-            assert os.path.isdir(metadata_directory), RuntimeError(f"Invalid path for metadata: {metadata_directory}")
+            metadata_directory = metadata if isinstance(metadata, str) else prediction_directory
+            os.makedirs(metadata_directory, exist_ok=True)
+            assert os.path.isdir(crop_directory), RuntimeError(f"Invalid path for metadata: {metadata_directory}")
             # The metadata path is then constructed as a .json file in the metadata directory with the name metadata_{base_name}_id_{identifier}.<EXT>
             metadata_path = os.path.join(metadata_directory, f'metadata_{basename}_UUID_{identifier}')
             # Serialize the data to the metadata path
