@@ -43,7 +43,8 @@ import argparse
 import glob
 import os
 import re
-from typing import List, Optional
+import uuid
+from typing import Optional
 
 import torch
 from tqdm import tqdm
@@ -55,7 +56,13 @@ from flat_bug.predictor import Predictor
 
 
 def cli_args():
-    args_parse = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    args_parse = argparse.ArgumentParser(
+        prog="fb_predict",
+        description="""\
+            Perform instance detection and segmentation with flatbug on
+            one or more images or a video.""",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
 
     args_parse.add_argument("-i", "--input", type=str, dest="input", required=True,
                             help="A image file or a directory of image files")
@@ -77,6 +84,7 @@ def cli_args():
     args_parse.add_argument("-d", "--dtype", type=str, default="float16", help="Which dtype to use for inference. Default is 'float16'.")
     args_parse.add_argument("-f", "--fast", action="store_true", help="Use fast mode.")
     args_parse.add_argument("--config", type=str, default=None, help="The config file.")
+    args_parse.add_argument("--id", type=str, default=None, required=False, help="Identifier (ID) for prediction run.")
     args_parse.add_argument("--no-crops", action="store_true", help="Do not save the crops.")
     args_parse.add_argument("--no-overviews", action="store_true", help="Do not save the overviews.")
     args_parse.add_argument("--no-metadata", action="store_true", help="Do not save the metadata.")
@@ -103,6 +111,7 @@ def predict(
         dtype : str="float16",
         fast : bool=False,
         config : Optional[str]=None,
+        id : Optional[str]=None,
         no_crops : bool=False,
         no_overviews : bool=False,
         no_metadata : bool=False,
@@ -121,7 +130,7 @@ def predict(
         input = os.path.normpath(input)
     output_dir = os.path.normpath(output_dir)
     model_weights = os.path.normpath(model_weights)
-    if not config is None:
+    if config is not None:
         config = os.path.normpath(config)
 
     if isERDA:
@@ -151,13 +160,15 @@ def predict(
     
     dtype = dtype
     
-    if not config is None:
+    if config is not None:
         config = read_cfg(config)
     else:
         config = DEFAULT_CFG
     if nms_metric is not None:
         config["OVERLAP_METRIC"] = nms_metric
     
+    if id is None:
+        id = str(uuid.uuid4())
     
     crops = not no_crops
     metadata = not no_metadata
@@ -268,8 +279,6 @@ def predict(
             file_iter = file_iter[:max_images]
 
     all_json_results = []
-
-    UUID = "ChangeThisTEMPORARY" # fixme, this is a temporary solution, but we should use a UUID for each run
     
     pbar = tqdm(enumerate(file_iter), total=len(file_iter), desc="Processing images", dynamic_ncols=True, unit="image")
     for i, f in pbar:
@@ -293,15 +302,15 @@ def predict(
                     metadata = metadata,
                     crops = crops,
                     mask_crops = True,
-                    identifier = UUID, #str(uuid.uuid4()),
+                    identifier = id,
                 )
-                if not result_directory is None:
+                if result_directory is not None:
                     json_files = [f for f in glob.glob(os.path.join(glob.escape(metadata if isinstance(metadata, str) else result_directory), f"*{os.path.splitext(os.path.basename(f))[0]}*.json"))]
                     assert len(json_files) == 1
                     all_json_results.append(json_files[0])
                 if isVideo and overviews:
-                    if not result_directory is None:
-                        overview_file = glob.glob(os.path.join(result_directory, f"overview_*UUID_{UUID}.jpg"))
+                    if result_directory is not None:
+                        overview_file = glob.glob(os.path.join(result_directory, f"overview_*UUID_{id}.jpg"))
                         if len(overview_file) == 1:
                             overview_file = overview_file[0]
                         elif len(overview_file) > 1:
@@ -311,7 +320,7 @@ def predict(
                         else:
                             raise ValueError(f"Unexpected error. Found {len(overview_file)} overview files?")
                     elif isinstance(overviews, str):
-                        overview_file = os.path.join(overviews, f"overview_{os.path.splitext(os.path.basename(f))[0]}_UUID_{UUID}.jpg")
+                        overview_file = os.path.join(overviews, f"overview_{os.path.splitext(os.path.basename(f))[0]}_UUID_{id}.jpg")
                     else:
                         raise ValueError(f"Unexpected video inference settings. {result_directory=}, {overviews=}")
                     frames.append(overview_file)
