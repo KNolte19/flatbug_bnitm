@@ -44,11 +44,24 @@ from flat_bug.yolo_helpers import (
 
 
 class AsyncExecutor:
-    def __init__(self, max_workers : int=1, max_backlog : int=1e3):
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+    def __init__(self, max_workers: Optional[int] = None, max_backlog: int = 1000):
+        if max_workers is None:
+            max_workers = max(1, min(16, (os.cpu_count() or 2) // 2))
+        
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="AsyncSaver"
+        )
+        
+        for thread in self._executor._threads:
+            thread.daemon = True
+
         self._semaphore = threading.BoundedSemaphore(max_backlog + max_workers)
-        # Register shutdown to ensure all background tasks finish on exit
-        atexit.register(self._executor.shutdown, wait=True)
+        atexit.register(self.shutdown)
+
+    def shutdown(self):
+        """Explicitly shutdown without double-waiting if possible."""
+        self._executor.shutdown(wait=True, cancel_futures=True)
 
     def submit(self, fn : Callable, *args, **kwargs):
         """Submit an async function call.

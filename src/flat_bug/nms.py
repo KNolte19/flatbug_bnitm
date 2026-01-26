@@ -2,9 +2,9 @@ from functools import partial
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import numpy as np
+import shapely
 import torch
 import torchvision
-from shapely.geometry import Polygon
 
 from flat_bug import logger
 
@@ -79,25 +79,6 @@ def ios_boxes(
     intersections, unions = _box_inter_union(rectangles, other_rectangles)
     ios = intersections / (sareas + 1e-6)
     return ios
-    
-@torch.jit.script
-def intersect_masks_2sets(
-        m1s : torch.Tensor, 
-        m2s : torch.Tensor, 
-        dtype : torch.dtype=torch.float32
-    ) -> torch.Tensor:
-    """
-    Computes intersection between all pairs between two sets of masks.
-
-    Args:
-        m1s (`torch.Tensor`): A tensor of shape (n, h, w), where n is the number of masks and h and w are the height and width of the masks.
-        m2s (`torch.Tensor`): A tensor of shape (m, h, w), where m is the number of masks and h and w are the height and width of the masks.
-        dtype (`torch.dtype`, optional): The data type of the output tensor. Defaults to torch.float32.
-
-    Returns:
-        out (`torch.Tensor`): A tensor of shape (n, m) containing the intersection (i.e. sum of elementwise product) of each pair of masks.
-    """
-    return (torch.matmul(m1s.reshape(m1s.shape[0], -1).to(dtype), m2s.reshape(m2s.shape[0], -1).t().to(dtype))).to(torch.int32)
 
 @torch.jit.script
 def iou_masks(
@@ -130,25 +111,30 @@ def iou_masks(
     Returns:
         out (`torch.Tensor`): A tensor of shape (n, m) containing the IoU of each pair of masks.
     """
-    if len(m1s.shape) == 2:
+    # 1. Standardize Inputs: Ensure batch dim and flatten spatial dims (N, H, W) -> (N, P)
+    if m1s.dim() == 2:
         m1s = m1s.unsqueeze(0)
-    if len(m2s.shape) == 2:
+    if m2s.dim() == 2:
         m2s = m2s.unsqueeze(0)
+        
+    m1s_flat = m1s.flatten(1)
+    m2s_flat = m2s.flatten(1)
+
+    # 2. Pre-calculate Areas (if not provided) using the flattened view
     if a1s is None:
-        a1s = m1s.sum(dim=(1, 2), dtype=torch.int32).unsqueeze(0)
-        if a1s.shape[0] > 0:
-            a1s = a1s.T
+        a1s = m1s_flat.sum(dim=1).to(dtype)
     else:
-        a1s = a1s.to(torch.int32)
+        a1s = a1s.to(dtype)
+        
     if a2s is None:
-        a2s = m2s.sum(dim=(1, 2), dtype=torch.int32).unsqueeze(0)
+        a2s = m2s_flat.sum(dim=1).to(dtype)
     else:
-        a2s = a2s.to(torch.int32)
+        a2s = a2s.to(dtype)
     
-    intersections = intersect_masks_2sets(m1s, m2s)
-    unions = a1s + a2s - intersections
+    intersections = torch.mm(m1s_flat.to(dtype), m2s_flat.t().to(dtype))
+    unions = a1s.unsqueeze(1) + a2s.unsqueeze(0) - intersections
     
-    return (intersections / (unions + 1e-6)).to(dtype)
+    return intersections / (unions + 1e-6)
 
 @torch.jit.script
 def ios_masks(
@@ -181,148 +167,97 @@ def ios_masks(
     Returns:
         out (`torch.Tensor`): A tensor of shape (n, m) containing the IoS of each pair of masks.
     """
-    if len(m1s.shape) == 2:
+    # 1. Standardize Inputs: Ensure batch dim and flatten spatial dims (N, H, W) -> (N, P)
+    if m1s.dim() == 2:
         m1s = m1s.unsqueeze(0)
-    if len(m2s.shape) == 2:
+    if m2s.dim() == 2:
         m2s = m2s.unsqueeze(0)
-    if a1s is None:
-        a1s = m1s.sum(dim=(1, 2), dtype=torch.int32).unsqueeze(0)
-        if a1s.shape[0] > 0:
-            a1s = a1s.T
-    else:
-        a1s = a1s.to(torch.int32)
-    if a2s is None:
-        a2s = m2s.sum(dim=(1, 2), dtype=torch.int32).unsqueeze(0)
-    else:
-        a2s = a2s.to(torch.int32)
+        
+    m1s_flat = m1s.flatten(1)
+    m2s_flat = m2s.flatten(1)
 
-    intersections = intersect_masks_2sets(m1s, m2s, dtype)
-    smaller_area = torch.min(a1s, a2s)
+    # 2. Pre-calculate Areas (if not provided) using the flattened view
+    if a1s is None:
+        a1s = m1s_flat.sum(dim=1).to(dtype)
+    else:
+        a1s = a1s.to(dtype)
+        
+    if a2s is None:
+        a2s = m2s_flat.sum(dim=1).to(dtype)
+    else:
+        a2s = a2s.to(dtype)
     
-    return intersections / (smaller_area + 1e-6)
+    intersections = torch.mm(m1s_flat.to(dtype), m2s_flat.t().to(dtype))
+    amin = torch.minimum(a1s.unsqueeze(1), a2s.unsqueeze(0))
+    
+    return intersections / (amin + 1e-6)
 
 def iou_polygons(
-        polygons1 : List[torch.Tensor], 
-        polygons2 : Optional[List[torch.Tensor]]=None, 
-        dtype : torch.dtype=torch.float32
-    ) -> torch.Tensor:
-    """
-    Calculates the intersection over union (IoU) of a set of polygons.
-
-    The IoU is calculated using:
+        polygons1: Union[List[torch.Tensor], np.ndarray], 
+        polygons2: Optional[Union[List[torch.Tensor], np.ndarray]] = None
+    ) -> np.ndarray:
     
-    `IoU[i,j] = intersection[i, j] / (area1[i] + area2[j] - intersection[i, j])`
+    if len(polygons1) == 0:
+        return np.empty((0, 0 if polygons2 is None else len(polygons2)), dtype=np.float32)
 
-    and then intersections and areas are calculated with the Shapely library.
+    is_symmetric = polygons2 is None
+    
+    def ensure_geoms(objs: Any) -> np.ndarray:
+        # If it's already an object-dtype numpy array, assume it's shapely geoms
+        if isinstance(objs, np.ndarray) and objs.dtype == object:
+            return objs
+        # Otherwise, convert from List[torch.Tensor] or similar
+        return np.array([shapely.polygons(p.cpu().numpy()).buffer(0) for p in objs])
 
-    OBS: Invalid polygons are handled by using the buffer(0) method from Shapely, which ensures that the function does not crash, but the results are not guaranteed to be "correct" for invalid polygons.
+    geoms1 = ensure_geoms(polygons1)
+    geoms2 = geoms1 if is_symmetric else ensure_geoms(polygons2)
 
-    Args:
-        polygons1 (`List[torch.Tensor]`): A list of tensors of shape (n, 2), where n is the number of vertices in the polygon and the 2 columns are the x and y coordinates of the vertices.
-        polygons2 (`Optional[List[torch.Tensor]]`, optional): A list of tensors of shape (m, 2), where m is the number of vertices in the polygon and the 2 columns are the x and y coordinates of the vertices. Defaults to None, in which case the symmetric IoU of the polygons with themselves is calculated.
+    areas1 = shapely.area(geoms1)
+    areas2 = areas1 if is_symmetric else shapely.area(geoms2)
+    
+    intersections = shapely.area(shapely.intersection(geoms1[:, np.newaxis], geoms2[np.newaxis, :]))
 
-    Returns:
-        out (`torch.Tensor`): A tensor of shape (n, m), where n is the number of polygons in polygons1 and m is the number of polygons in polygons2, containing the IoU of each polygon in polygons1 with each polygon in polygons2.
-    """
-    device = polygons1[0].device
-    if polygons2 is None:
-        # If polygons2 is None, we calculate the symmetric IoU of polygons1 with itself
-        # This can be done slightly more efficiently than the non-symmetric case, as we only need to calculate the upper triangular part of the matrix
+    unions = areas1[:, np.newaxis] + areas2[np.newaxis, :] - intersections
+    iou_mat = (intersections / (unions + 1e-6)).astype(np.float32)
 
-        # Initialize the IoU matrix
-        iou_mat = torch.zeros((len(polygons1), len(polygons1)), dtype=dtype, device=device)
-        # Calculate the upper triangular part of the matrix row by row
-        for i in range(len(polygons1)):
-            iou_mat[i, i+1:] = iou_polygons([polygons1[i]], polygons1[i+1:], dtype=dtype).squeeze(0)
-        # Fold the matrix to make it symmetric
-        iou_mat = iou_mat + iou_mat.T
-        # Fill the diagonal with 1s
-        iou_mat = iou_mat.fill_diagonal_(1)
-        return iou_mat
-    for polygon in polygons1 + polygons2:
-        if len(polygon.shape) != 2 or polygon.shape[1] != 2:
-            raise ValueError(f"Polygons must be of shape (n, 2), not {polygon.shape}: {polygon}")
-    # Initialize the IoU matrix as a numpy array to minimize type conversions
-    iou_mat = np.zeros((len(polygons1), len(polygons2)), dtype=np.float32)
-    # Convert the tensors to Shapely polygons and calculate the areas
-    polygons1 = [Polygon(polygon.cpu().numpy()).buffer(0) for polygon in polygons1]
-    polygons2 = [Polygon(polygon.cpu().numpy()).buffer(0) for polygon in polygons2]
-    areas1 = np.array([polygon.area for polygon in polygons1], dtype=np.float32)
-    areas2 = np.array([polygon.area for polygon in polygons2], dtype=np.float32)
-    # Naïvely loop through all pairs of polygons and calculate the IoU using Shapely
-    for i, polygon1 in enumerate(polygons1):
-        areas1_i = areas1[i]
-        for j, polygon2 in enumerate(polygons2):
-            # Check for intersection before calculating the intersection
-            if polygon1.intersects(polygon2):
-                intersection = polygon1.intersection(polygon2).area
-                union = areas1_i + areas2[j] - intersection
-                # Calculate the IoU and store it in the IoU matrix, we add a small epsilon to the denominator to avoid division by zero
-                iou_mat[i, j] = intersection / (union + 1e-6)
-    # Convert the IoU matrix to a torch tensor and return it
-    return torch.tensor(iou_mat, dtype=dtype, device=device)
+    if is_symmetric:
+        np.fill_diagonal(iou_mat, 1.0)
+
+    return iou_mat
+
 
 def ios_polygons(
-        polygons1 : List[torch.Tensor], 
-        polygons2 : Optional[List[torch.Tensor]]=None, 
-        dtype : torch.dtype=torch.float32
-    ) -> torch.Tensor:
-    """
-    Calculates the intersection over smaller area (IoS) of a set of polygons.
-
-    The IoS is calculated using:
+        polygons1: Union[List[torch.Tensor], np.ndarray], 
+        polygons2: Optional[Union[List[torch.Tensor], np.ndarray]] = None
+    ) -> np.ndarray:
     
-    `IoU[i,j] = intersection[i, j] / min(area1[i] + area2[j])`
+    if len(polygons1) == 0:
+        return np.empty((0, 0 if polygons2 is None else len(polygons2)), dtype=np.float32)
 
-    and then intersections and areas are calculated with the Shapely library.
+    is_symmetric = polygons2 is None
+    
+    def ensure_geoms(objs: Any) -> np.ndarray:
+        # If it's already an object-dtype numpy array, assume it's shapely geoms
+        if isinstance(objs, np.ndarray) and objs.dtype == object:
+            return objs
+        # Otherwise, convert from List[torch.Tensor] or similar
+        return np.array([shapely.polygons(p.cpu().numpy()).buffer(0) for p in objs])
 
-    OBS: Invalid polygons are handled by using the buffer(0) method from Shapely, which ensures that the function does not crash, but the results are not guaranteed to be "correct" for invalid polygons.
+    geoms1 = ensure_geoms(polygons1)
+    geoms2 = geoms1 if is_symmetric else ensure_geoms(polygons2)
 
-    Args:
-        polygons1 (`List[torch.Tensor]`): A list of tensors of shape (n, 2), where n is the number of vertices in the polygon and the 2 columns are the x and y coordinates of the vertices.
-        polygons2 (`Optional[List[torch.Tensor]]`, optional): A list of tensors of shape (m, 2), where m is the number of vertices in the polygon and the 2 columns are the x and y coordinates of the vertices. 
-            Defaults to None, in which case the symmetric IoS of the polygons with themselves is calculated.
+    areas1 = shapely.area(geoms1)
+    areas2 = areas1 if is_symmetric else shapely.area(geoms2)
+    
+    intersections = shapely.area(shapely.intersection(geoms1[:, np.newaxis], geoms2[np.newaxis, :]))
 
-    Returns:
-        out (`torch.Tensor`): A tensor of shape (n, m), where n is the number of polygons in polygons1 and m is the number of polygons in polygons2, containing the IoS of each polygon in polygons1 with each polygon in polygons2.
-    """
-    device = polygons1[0].device
-    if polygons2 is None:
-        # If polygons2 is None, we calculate the symmetric IoS of polygons1 with itself
-        # This can be done slightly more efficiently than the non-symmetric case, as we only need to calculate the upper triangular part of the matrix
+    areas_min = np.minimum(areas1[:, np.newaxis], areas2[np.newaxis, :])
+    ios_mat = (intersections / (areas_min + 1e-6)).astype(np.float32)
 
-        # Initialize the IoU matrix
-        iou_mat = torch.zeros((len(polygons1), len(polygons1)), dtype=dtype, device=device)
-        # Calculate the upper triangular part of the matrix row by row
-        for i in range(len(polygons1)):
-            iou_mat[i, i+1:] = ios_polygons([polygons1[i]], polygons1[i+1:], dtype=dtype).squeeze(0)
-        # Fold the matrix to make it symmetric
-        iou_mat = iou_mat + iou_mat.T
-        # Fill the diagonal with 1s
-        iou_mat = iou_mat.fill_diagonal_(1)
-        return iou_mat
-    for polygon in polygons1 + polygons2:
-        if len(polygon.shape) != 2 or polygon.shape[1] != 2:
-            raise ValueError(f"Polygons must be of shape (n, 2), not {polygon.shape}: {polygon}")
-    # Initialize the IoU matrix as a numpy array to minimize type conversions
-    iou_mat = np.zeros((len(polygons1), len(polygons2)), dtype=np.float32)
-    # Convert the tensors to Shapely polygons and calculate the areas
-    polygons1 = [Polygon(polygon.cpu().numpy()).buffer(0) for polygon in polygons1]
-    polygons2 = [Polygon(polygon.cpu().numpy()).buffer(0) for polygon in polygons2]
-    areas1 = np.array([polygon.area for polygon in polygons1], dtype=np.float32)
-    areas2 = np.array([polygon.area for polygon in polygons2], dtype=np.float32)
-    # Naïvely loop through all pairs of polygons and calculate the IoU using Shapely
-    for i, polygon1 in enumerate(polygons1):
-        areas1_i = areas1[i]
-        for j, polygon2 in enumerate(polygons2):
-            # Check for intersection before calculating the intersection
-            if polygon1.intersects(polygon2):
-                intersection = polygon1.intersection(polygon2).area
-                min_area = min(areas1_i, areas2[j])
-                # Calculate the IoU and store it in the IoU matrix, we add a small epsilon to the denominator to avoid division by zero
-                iou_mat[i, j] = intersection / (min_area + 1e-6)
-    # Convert the IoU matrix to a torch tensor and return it
-    return torch.tensor(iou_mat, dtype=dtype, device=device)
+    if is_symmetric:
+        np.fill_diagonal(ios_mat, 1.0)
+
+    return ios_mat
 
 def base_nms_(
         objects : Any, 
@@ -495,98 +430,96 @@ def nms_masks_(
     Returns:
         out (`torch.Tensor`): A tensor containing the indices of the picked masks.
     """
-    # Sort the boxes by score (implicitly)
+    device = masks.device
+    if len(masks) == 0:
+        return torch.empty(0, dtype=torch.long, device=device)
+
     indices = torch.argsort(scores, descending=True)
 
-    # Initialize tensors for winners (selected boxes), possible boxes and counters
-    winners = -torch.ones(masks.shape[0], dtype=torch.long, device=masks.device)
-    possible = torch.ones(masks.shape[0], dtype=torch.bool, device=masks.device)
+    # We MUST cast to float32 here because torch.mm (used in overlap_fn) does not support bool.
+    masks = masks.flatten(1).to(dtype=torch.float32)[indices]
+    areas = masks.sum(dim=1)
+
+    winners = -torch.ones(masks.shape[0], dtype=torch.long, device=device)
+    possible = torch.ones(masks.shape[0], dtype=torch.bool, device=device)
     i = 0
 
     while True:
-        possible_idx = possible.nonzero().squeeze()
+        possible_idx = possible.nonzero().squeeze(1)
         n_possible = possible_idx.numel()
+        
         if n_possible < 2:
             if n_possible == 1:
                 possible[possible_idx] = False
                 winners[i] = possible_idx
                 i += 1
             break
-        # Pick the box with the highest score
+            
         winners[i] = possible_idx[0]
-        # Remove the picked box from the possible boxes
         possible[possible_idx[0]] = False
-        # Calculate the overlaps (e.g. IoU) between the picked box and the remaining possible boxes
-        overlaps = overlap_fn(masks[indices[possible_idx[0]]], masks[indices[possible_idx[1:]]], dtype=torch.float32).squeeze(0)
-        # Get the indices of the boxes with an overlap greater than the threshold
+        
+        overlaps = overlap_fn(
+            masks[possible_idx[0:1]].unsqueeze(1), 
+            masks[possible_idx[1:]].unsqueeze(1), 
+            a1s=areas[possible_idx[0:1]], 
+            a2s=areas[possible_idx[1:]], 
+            dtype=torch.float32
+        ).squeeze(0)
+        
         winner_mask = overlaps <= overlap_threshold
-        # Remove the boxes with an overlap greater than the threshold from the possible boxes
         possible[possible_idx[1:]] = winner_mask
         i += 1
 
-    # Map the indices back to the original indices and sort them (returns boxes, scores & indices in the original order of the input)
-    winners = indices[winners[:i]].sort().values 
-    
-    # Return the winning indices
-    return winners
+    return indices[winners[:i]].sort().values 
 
 def nms_polygons_(
         polys : List[torch.Tensor], 
         scores : torch.Tensor, 
         overlap_threshold : float=0.5,
-        overlap_fn : Callable[[List[torch.Tensor], List[torch.Tensor]], torch.Tensor]=iou_polygons
+        overlap_fn : Callable[[np.ndarray, np.ndarray], np.ndarray]=iou_polygons
     ) -> torch.Tensor:
-    """
-    Performs non-maximum suppression on a set of polygons.
-
-    Args:
-        polys (`List[torch.Tensor]`): A list of tensors of shape (n, 2), where n is the number of vertices in the polygon and the 2 columns are the x and y coordinates of the vertices.
-        scores (`torch.Tensor`): A tensor of shape (n, ) containing the scores of the polygons.
-        overlap_threshold (`float`, optional): The overlap (e.g. IoU) threshold for non-maximum suppression. Defaults to 0.5.
-
-    Returns:
-        out (`torch.Tensor`): A tensor containing the indices of the picked polygons.
-    """
+    device = scores.device
     if len(polys) == 0 or len(polys) == 1:
-        return torch.arange(len(polys))
-    if len(scores.shape) != 1:
-        raise ValueError(f"Scores must be of shape (n,), not {scores.shape}")
-    device = polys[0].device
+        return torch.arange(len(polys), device=device)
 
-    # Sort the boxes by score (implicitly)
-    indices = torch.argsort(scores, descending=True)
+    scores_np = scores.cpu().numpy()
+    geoms = np.array([shapely.polygons(p.cpu().numpy()).buffer(0) for p in polys])
 
-    # Initialize tensors for winners (selected boxes), possible boxes and counters
-    winners = -torch.ones(len(polys), dtype=torch.long, device=device)
-    possible = torch.ones(len(polys), dtype=torch.bool, device=device)
+    indices = np.argsort(scores_np)[::-1] # Ascending sort -> reverse for descending
+    geoms = geoms[indices]
+
+    # int64 to ensure compatibility when converting back to torch.long later
+    winners = np.full(len(polys), -1, dtype=np.int64)
+    possible = np.ones(len(polys), dtype=bool)
     i = 0
 
     while True:
-        possible_idx = possible.nonzero().squeeze()
-        n_possible = possible_idx.numel()
+        possible_idx = np.flatnonzero(possible)
+        n_possible = possible_idx.size
+        
         if n_possible < 2:
             if n_possible == 1:
                 possible[possible_idx] = False
-                winners[i] = possible_idx
+                winners[i] = possible_idx[0]
                 i += 1
             break
-        # Pick the box with the highest score
-        winners[i] = possible_idx[0]
-        # Remove the picked box from the possible boxes
-        possible[possible_idx[0]] = False
-        # Calculate the overlaps (e.g. IoU) between the picked box and the remaining possible boxes
-        overlaps = overlap_fn([polys[indices[possible_idx[0]].item()]], [polys[pi.item()] for pi in indices[possible_idx[1:]]]).squeeze(0)
-        # Get the indices of the boxes with an overlap greater than the threshold
+
+        # Pick the winner
+        curr_idx = possible_idx[0]
+        winners[i] = curr_idx
+        possible[curr_idx] = False
+
+        overlaps = overlap_fn(
+            geoms[curr_idx:curr_idx+1], 
+            geoms[possible_idx[1:]]
+        ).squeeze(0)
+        
+        # Logical masking in pure NumPy
         winner_mask = overlaps <= overlap_threshold
-        # Remove the boxes with an overlap greater than the threshold from the possible boxes
         possible[possible_idx[1:]] = winner_mask
         i += 1
 
-    # Map the indices back to the original indices and sort them (returns boxes, scores & indices in the original order of the input)
-    winners = indices[winners[:i]].sort().values 
-
-    # Return the winning indices
-    return winners
+    return torch.from_numpy(np.sort(indices[winners[:i]])).to(device=device)
 
 @torch.jit.script
 def _compute_transitive_closure_compatible(adjacency_matrix : torch.Tensor) -> torch.Tensor:

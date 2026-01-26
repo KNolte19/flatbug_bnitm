@@ -340,6 +340,8 @@ def predict(
         raise NotImplementedError("Multi-GPU support is not supported. Worker termination is not implemented.")
     if isERDA:
         io.stop()
+    if verbose:
+        logger.info("All steps done, process cleaning up.")
 
 def main():
     predict(**cli_args())
