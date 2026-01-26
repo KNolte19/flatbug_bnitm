@@ -1,10 +1,11 @@
+import atexit
 import base64
 import json
 import os
 import pathlib
-import shutil
-import tempfile
-from typing import Any, List, Optional, Self, Tuple, Union
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, List, Optional, Self, Tuple, Union
 
 import cv2
 import numpy as np
@@ -21,15 +22,62 @@ from ultralytics.engine.results import Results
 # from flat_bug.yolo_helpers import *
 from flat_bug import download_from_repository, logger
 from flat_bug.config import CFG_PARAMS, DEFAULT_CFG, read_cfg
-from flat_bug.geometric import (calculate_tile_offsets, chw2hwc_uint8,
-                                contours_to_masks, create_contour_mask,
-                                find_contours, poly_area, scale_contour,
-                                simplify_contour)
-from flat_bug.nms import detect_duplicate_boxes, nms_masks, nms_polygons, get_overlap_fn
-from flat_bug.yolo_helpers import (ResultsWithTiles, merge_tile_results,
-                                   offset_box, postprocess, resize_mask,
-                                   stack_masks)
+from flat_bug.geometric import (
+    calculate_tile_offsets,
+    chw2hwc_uint8,
+    contours_to_masks,
+    create_contour_mask,
+    find_contours,
+    poly_area,
+    scale_contour,
+    simplify_contour,
+)
+from flat_bug.nms import detect_duplicate_boxes, nms_masks, nms_polygons
+from flat_bug.yolo_helpers import (
+    ResultsWithTiles,
+    merge_tile_results,
+    offset_box,
+    postprocess,
+    resize_mask,
+    stack_masks,
+)
 
+
+class AsyncExecutor:
+    def __init__(self, max_workers : int=1, max_backlog : int=1e3):
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._semaphore = threading.BoundedSemaphore(max_backlog + max_workers)
+        # Register shutdown to ensure all background tasks finish on exit
+        atexit.register(self._executor.shutdown, wait=True)
+
+    def submit(self, fn : Callable, *args, **kwargs):
+        """Submit an async function call.
+        
+        Args:
+            fn: Function to call.
+            *args: Positional arguments passed to fn.
+            **kwargs: Keyword arguments passed to fn.
+        
+        Returns:
+            out: Return value of fn.
+        """
+        self._semaphore.acquire()
+        try:
+            future = self._executor.submit(fn, *args, **kwargs)
+            future.add_done_callback(lambda _: self._semaphore.release())
+            return future
+        except Exception:
+            self._semaphore.release()
+            raise
+
+    def flush(self):
+        """Blocks until all currently queued tasks are finished."""
+        self.submit(lambda: None).result()
+
+_executor = AsyncExecutor()
+
+# Usage inside your module:
+# saver = AsyncExecutor(max_backlog=50)
 
 # Class for containing the results from a single _detect_instances call - This should probably not be its own class, but just a TensorPredictions object with a single element instead, but this would require altering the TensorPredictions._combine_predictions function to handle a single element differently or pass a flag or something
 class Prepared_Results:
@@ -129,7 +177,7 @@ class TensorPredictions:
             for pi, p in enumerate(predictions):
                 assert p.device == self.device, RuntimeError(f"predictions[{pi}].device {p.device} != device {self.device}")
                 assert p.dtype == self.dtype, RuntimeError(f"predictions[{pi}].dtype {p.dtype} != dtype {self.dtype}")
-            if not image is None:
+            if image is not None:
                 assert image.device == self.device, RuntimeError(f"image.device {image.device} != device {self.device}")
 
         # Set attributes
@@ -516,7 +564,7 @@ class TensorPredictions:
         """
         new_tp = self.new()
         for k, v in self.__dict__.items():
-            if not k in self.CONSTANTS:
+            if k not in self.CONSTANTS:
                 # Check if 'i' is a slice
                 if isinstance(i, slice):
                     new_value = v[i]
@@ -880,8 +928,7 @@ class TensorPredictions:
             crop_masks = [None] * len(crops)
         crop_paths = [os.path.join(outdir, f"crop_{basename}_CROPNUMBER_{i}_UUID_{identifier}{image_ext}") for i in range(len(crops))]
 
-        return [self._save_1_crop(crop, mask, path) for crop, mask, path in zip(crops, crop_masks, crop_paths)]
-        
+        return [self._save_1_crop(crop, mask, path) for crop, mask, path in zip(crops, crop_masks, crop_paths)]        
     
     @property
     def json_data(self):
@@ -1067,12 +1114,9 @@ class TensorPredictions:
             `str`: The path to the directory containing the serialized data - the crops and overview image(s) are also saved here by default. \\
                 If the standard location is not used at all, the directory is not created and None is returned instead.
         """
-        if not os.path.exists(output_directory):
-            os.makedirs(output_directory)
-
         if basename is None:
             if self.image_path is None:
-                raise ValueError(f"Unable to save prediction with unknown source file, when `basename` is not supplied.")
+                raise ValueError("Unable to save prediction with unknown source file, when `basename` is not supplied.")
             # Get the base name of the image
             basename = os.path.splitext(os.path.basename(self.image_path))[0]
         # Construct the prediction directory path
@@ -1080,56 +1124,43 @@ class TensorPredictions:
         # Create the prediction directory if it does not exist and it is needed (i.e. if we are saving crops, overview, or metadata to a standard location)
         prediction_directory_is_used = (overview is True) or (crops is True) or (metadata is True)
         if prediction_directory_is_used:
-            if not os.path.exists(prediction_directory):
-                os.makedirs(prediction_directory)
+            os.makedirs(prediction_directory, exist_ok=True)
 
         # Save overview
         if overview:
             # Check if the overview path is overwritten and make sure the directory exists and is a directory
-            if not isinstance(overview, str):
-                overview_directory = prediction_directory
-            else:
-                if not os.path.exists(overview):
-                    os.makedirs(overview)
-                overview_directory = overview
+            overview_directory = overview if isinstance(overview, str) else prediction_directory
+            os.makedirs(overview_directory, exist_ok=True)
             assert os.path.isdir(overview_directory), RuntimeError(f"Invalid path for overview: {overview_directory}")
             # The overview path is then constructed as a .jpg file in the overview directory with the name overview_{base_name}.jpg
             overview_path = os.path.join(overview_directory, f"overview_{basename}_UUID_{identifier}.jpg")
             # Save the overview image to the overview path
             if not fast:
-                self.plot(outpath=overview_path, linewidth=2, scale=1)
+                _executor.submit(self.plot, outpath=overview_path, linewidth=2, scale=1)
             else:
                 max_dim = max(self.image.shape[1:])
                 fast_scale = min(1 / 2, 3072 / max_dim)
-                self.plot(outpath=overview_path, linewidth=1, scale=fast_scale)
+                _executor.submit(self.plot, outpath=overview_path, linewidth=1, scale=fast_scale)
 
         # Save crops
         if crops:
             # Check if the crops path is overwritten and make sure the directory exists and is a directory
-            if not isinstance(crops, str):
-                crop_directory = os.path.join(prediction_directory, "crops")
-            else:
-                crop_directory = crops
-            if not os.path.exists(crop_directory):
-                os.makedirs(crop_directory)
+            crop_directory = crops if isinstance(crops, str) else os.path.join(prediction_directory, "crops") 
+            os.makedirs(crop_directory, exist_ok=True)
             assert os.path.isdir(crop_directory), RuntimeError(f"Invalid path for crops: {crop_directory}")
             # Save the crops to the crops path
-            self.save_crops(crop_directory, basename=basename, mask=mask_crops, identifier=identifier)
+            _executor.submit(self.save_crops, outdir=crop_directory, basename=basename, mask=mask_crops, identifier=identifier)
 
         # Save json
         if metadata:
             # Check if the metadata path is overwritten and make sure the directory exists and is a directory
-            if not isinstance(metadata, str):
-                metadata_directory = prediction_directory
-            else:
-                if not os.path.exists(metadata):
-                    os.makedirs(metadata)
-                metadata_directory = metadata
-            assert os.path.isdir(metadata_directory), RuntimeError(f"Invalid path for metadata: {metadata_directory}")
+            metadata_directory = metadata if isinstance(metadata, str) else prediction_directory
+            os.makedirs(metadata_directory, exist_ok=True)
+            assert os.path.isdir(crop_directory), RuntimeError(f"Invalid path for metadata: {metadata_directory}")
             # The metadata path is then constructed as a .json file in the metadata directory with the name metadata_{base_name}_id_{identifier}.<EXT>
             metadata_path = os.path.join(metadata_directory, f'metadata_{basename}_UUID_{identifier}')
             # Serialize the data to the metadata path
-            self.serialize(outpath=metadata_path, identifier=identifier)
+            _executor.submit(self.serialize, outpath=metadata_path, identifier=identifier)
 
         return prediction_directory if prediction_directory_is_used else None
 

@@ -53,6 +53,7 @@ from flat_bug import logger, set_log_level
 from flat_bug.coco_utils import fb_to_coco
 from flat_bug.config import DEFAULT_CFG, read_cfg
 from flat_bug.predictor import Predictor
+from flat_bug.predictor import _executor as prediction_executor
 
 
 def cli_args():
@@ -305,30 +306,23 @@ def predict(
                     identifier = id,
                 )
                 if result_directory is not None:
-                    json_files = [f for f in glob.glob(os.path.join(glob.escape(metadata if isinstance(metadata, str) else result_directory), f"*{os.path.splitext(os.path.basename(f))[0]}*.json"))]
-                    assert len(json_files) == 1
-                    all_json_results.append(json_files[0])
-                if isVideo and overviews:
-                    if result_directory is not None:
-                        overview_file = glob.glob(os.path.join(result_directory, f"overview_*UUID_{id}.jpg"))
-                        if len(overview_file) == 1:
-                            overview_file = overview_file[0]
-                        elif len(overview_file) > 1:
-                            raise ValueError("Multiple overview files found.")
-                        elif len(overview_file) == 0:
-                            raise ValueError("No overview file found.")
-                        else:
-                            raise ValueError(f"Unexpected error. Found {len(overview_file)} overview files?")
-                    elif isinstance(overviews, str):
-                        overview_file = os.path.join(overviews, f"overview_{os.path.splitext(os.path.basename(f))[0]}_UUID_{id}.jpg")
-                    else:
-                        raise ValueError(f"Unexpected video inference settings. {result_directory=}, {overviews=}")
-                    frames.append(overview_file)
+                    basename = os.path.splitext(os.path.basename(f))[0]
+                    metadata_directory = metadata if isinstance(metadata, str) else result_directory
+                    overview_directory = overviews if isinstance(overviews, str) else result_directory
+                    # crop_directory = crops if isinstance(crops, str) else os.path.join(result_directory, crops)
+                    all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{id}'))
+                    if isVideo and overviews:
+                        frames.append(os.path.join(overview_directory, f"overview_{basename}_UUID_{id}.jpg"))
         except Exception as e:
             logger.error(f"Issue whilst processing {f}")
             #fixme, what is going on with /home/quentin/todo/toup/20221008_16-01-04-226084_raw_jpg.rf.0b8d397da3c47408694eeaab2cde06e5.jpg?
             logger.error(e)
             raise e
+    if verbose:
+        logger.info("Finalizing results...")
+    prediction_executor.flush()
+    if verbose:
+        logger.info("All results finished.")
     if not no_compiled_coco:
         if len(all_json_results) == 0:
             logger.info("No results found, unable to compile COCO file.")
