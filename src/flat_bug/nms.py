@@ -6,7 +6,7 @@ import shapely
 import torch
 import torchvision
 
-from flat_bug import logger
+import scipy.sparse
 
 
 def iou_boxes(
@@ -430,9 +430,9 @@ def nms_masks_(
     Returns:
         out (`torch.Tensor`): A tensor containing the indices of the picked masks.
     """
-    device = masks.device
-    if len(masks) == 0:
-        return torch.empty(0, dtype=torch.long, device=device)
+    N, device = len(scores), masks.device
+    if N <= 1:
+        return torch.arange(N, dtype=torch.long, device=device)
 
     indices = torch.argsort(scores, descending=True)
 
@@ -440,11 +440,11 @@ def nms_masks_(
     masks = masks.flatten(1).to(dtype=torch.float32)[indices]
     areas = masks.sum(dim=1)
 
-    winners = -torch.ones(masks.shape[0], dtype=torch.long, device=device)
-    possible = torch.ones(masks.shape[0], dtype=torch.bool, device=device)
+    winners = -torch.ones(N, dtype=torch.long, device=device)
+    possible = torch.ones(N, dtype=torch.bool, device=device)
     i = 0
 
-    while True:
+    for _ in range(N):
         possible_idx = possible.nonzero().squeeze(1)
         n_possible = possible_idx.numel()
         
@@ -478,9 +478,9 @@ def nms_polygons_(
         overlap_threshold : float=0.5,
         overlap_fn : Callable[[np.ndarray, np.ndarray], np.ndarray]=iou_polygons
     ) -> torch.Tensor:
-    device = scores.device
-    if len(polys) == 0 or len(polys) == 1:
-        return torch.arange(len(polys), device=device)
+    N, device = len(scores), scores.device
+    if N <= 1:
+        return torch.arange(N, device=device)
 
     scores_np = scores.cpu().numpy()
     geoms = np.array([shapely.polygons(p.cpu().numpy()).buffer(0) for p in polys])
@@ -489,11 +489,11 @@ def nms_polygons_(
     geoms = geoms[indices]
 
     # int64 to ensure compatibility when converting back to torch.long later
-    winners = np.full(len(polys), -1, dtype=np.int64)
-    possible = np.ones(len(polys), dtype=bool)
+    winners = np.full(N, -1, dtype=np.int64)
+    possible = np.ones(N, dtype=bool)
     i = 0
 
-    while True:
+    for _ in range(N):
         possible_idx = np.flatnonzero(possible)
         n_possible = possible_idx.size
         
@@ -521,215 +521,61 @@ def nms_polygons_(
 
     return torch.from_numpy(np.sort(indices[winners[:i]])).to(device=device)
 
-@torch.jit.script
-def _compute_transitive_closure_compatible(adjacency_matrix : torch.Tensor) -> torch.Tensor:
-    """
-    Computes the transitive closure of a boolean matrix.
 
-    This function uses PyTorch operations compatible with both CPU and CUDA devices.
-
-    Args:
-        adjacency_matrix (`torch.Tensor`): A boolean matrix of shape (n, n), where n is the size of the graph represented by the matrix.
-
-    Returns:
-        out (`torch.Tensor`): A boolean matrix of shape (n, n), which is the transitive closure of the adjacency matrix.
-    """
-    device = adjacency_matrix.device
-    dtype = torch.float32
-    csize = adjacency_matrix.shape[0]
-    # Check for possible overflow
-    if csize > 2 ** (32 - 1) - 1:
-        raise ValueError(f"Matrix is too large ({csize}x{csize}) for computation")
-    # We convert to fp32 to avoid overflow when squaring the matrix and ensure torch compatibility
-    closure = adjacency_matrix.to(dtype) 
-    # Expand the adjacency matrix to the transitive closure matrix, by squaring the matrix and clamping the values to 1 - each step essentially corresponds to one step of parallel breadth-first search for all nodes
-    last_max = torch.zeros(csize, dtype=dtype, device=device)
-    for _ in range(int(torch.log2(torch.tensor(csize, dtype=torch.float32)).ceil())):
-        this_square = closure @ closure
-        this_max = this_square.max(dim=0).values
-        if (this_max == last_max).all():
-            break
-        closure[:] = this_square.clamp(max=1) # We don't need to worry about overflow, since overflow results in +inf, which is clamped to 1
-        last_max = this_max
-    # Convert the matrix back to boolean and return it
-    return closure > 0.5
-
-@torch.jit.script
-def _compute_transitive_closure_cuda(adjacency_matrix : torch.Tensor) -> torch.Tensor:
-    """
-    Computes the transitive closure of a boolean matrix.
-
-    This function uses the torch._int_mm function, which is only available on CUDA devices and is significantly faster than the CPU implementation.
-
-    Args:
-        adjacency_matrix (`torch.Tensor`): A boolean matrix of shape (n, n), where n is the size of the graph represented by the matrix.
-
-    Returns:
-        out (`torch.Tensor`): A boolean matrix of shape (n, n), which is the transitive closure of the adjacency matrix.
-    """
-    # torch._int_mm only supports matrices such that the output is larger than 32x32 and a multiple of 32
-    if len(adjacency_matrix) < 32:
-        padding = 32 - len(adjacency_matrix)
-    elif len(adjacency_matrix) % 32 != 0:
-        padding = 32 - len(adjacency_matrix) % 32
-    else:
-        padding = 0
-    # Pad the adjacency matrix to the nearest multiple of 8 and convert it to int8
-    closure = torch.nn.functional.pad(adjacency_matrix, (0, padding, 0, padding), value=0.).to(torch.int8) 
-    # Expand the adjacency matrix to the transitive closure matrix, by squaring the matrix and clamping the values to 1 - each step essentially corresponds to one step of parallel breadth-first search for all nodes
-    last_max = torch.zeros(len(closure), dtype=torch.int32, device=closure.device)
-    for _ in range(int(torch.log2(torch.tensor(adjacency_matrix.shape[0], dtype=torch.float16)).ceil())):
-        this_square = torch._int_mm(closure, closure)
-        this_max = this_square.max(dim=0).values
-        if (this_max == last_max).all():
-            break
-        closure[:] = this_square >= 1
-        last_max = this_max
-    # Convert the matrix back to boolean and remove the padding
-    closure = (closure > 0.5)
-    if padding > 0:
-        closure = closure[:-padding, :-padding]
-    return closure
-
-# Check if the _int_mm function is compatible with the current environment
-if torch.cuda.is_available():
-    try:
-        _compute_transitive_closure_cuda(torch.zeros((33, 33), dtype=torch.bool).cuda())
-        _INT_MM_SUPPORTED = True
-    except:
-        _INT_MM_SUPPORTED = False
-        logger.warning("_int_mm is not supported on this device, transitive closure subroutine falling back to CPU implementation")
-else:
-    _INT_MM_SUPPORTED = False
-
-# Since we use torch.jit.script, we cannot use the global variable _INT_MM_SUPPORTED inside the function, 
-# so we need to statically compile the function differently based on the availability of _int_mm
-if _INT_MM_SUPPORTED:
-    @torch.jit.script
-    def compute_transitive_closure(adjacency_matrix : torch.Tensor) -> torch.Tensor:
-        """
-        Computes the transitive closure of a boolean matrix.
-
-        Supports both CPU and CUDA devices, with performance and compatibility optimized sub-functions for each device.
-
-        Args:
-            adjacency_matrix (`torch.Tensor`): A boolean matrix of shape (n, n), where n is the size of the graph represented by the matrix.
-
-        Returns:
-            out (`torch.Tensor`): A boolean matrix of shape (n, n), which is the transitive closure of the adjacency matrix.
-        """
-        if len(adjacency_matrix.shape) != 2 or adjacency_matrix.shape[0] != adjacency_matrix.shape[1]:
-            raise ValueError(f"Matrix must be of shape (n, n), not {adjacency_matrix.shape}")
-        # If the matrix is a 0x0, 1x1 or 2x2 matrix, the transitive closure is the matrix itself, since there are no transitive relations
-        if len(adjacency_matrix) <= 2:
-            return adjacency_matrix    
-        # There can be a quite significant difference in performance between the CPU and GPU implementation, however this function is not the bottleneck, so it might not be noticeable in practice
-        if adjacency_matrix.is_cuda:
-            return _compute_transitive_closure_cuda(adjacency_matrix)
-        else:
-            return _compute_transitive_closure_compatible(adjacency_matrix)
-else:
-    @torch.jit.script
-    def compute_transitive_closure(adjacency_matrix : torch.Tensor) -> torch.Tensor:
-        """
-        Computes the transitive closure of a boolean matrix.
-
-        Supports both CPU and CUDA devices, with performance and compatibility optimized sub-functions for each device.
-
-        Args:
-            adjacency_matrix (`torch.Tensor`): A boolean matrix of shape (n, n), where n is the size of the graph represented by the matrix.
-
-        Returns:
-            out (`torch.Tensor`): A boolean matrix of shape (n, n), which is the transitive closure of the adjacency matrix.
-        """
-        if len(adjacency_matrix.shape) != 2 or adjacency_matrix.shape[0] != adjacency_matrix.shape[1]:
-            raise ValueError(f"Matrix must be of shape (n, n), not {adjacency_matrix.shape}")
-        # If the matrix is a 0x0, 1x1 or 2x2 matrix, the transitive closure is the matrix itself, since there are no transitive relations
-        if len(adjacency_matrix) <= 2:
-            return adjacency_matrix    
-        # When torch._int_mm is not supported, we default to the CPU implementation
-        return _compute_transitive_closure_compatible(adjacency_matrix)
-
-@torch.jit.script
-def extract_components(transitive_closure : torch.Tensor) -> Tuple[List[torch.Tensor], torch.Tensor]:
-    """
-    Extracts the connected components of a transitive closure matrix.
-
-    Args:
-        transitive_closure (`torch.Tensor`): A boolean matrix of shape (n, n), where n is the number of objects.
-
-    Returns:
-        out (`Tuple[List[torch.Tensor], torch.Tensor]`):
-            1. `List[torch.Tensor]`: A list of tensors, where each tensor contains the indices of the objects in a cluster.
-            2. `torch.Tensor`: A tensor of shape (n, ) containing the cluster index of each object.
-    """
-    n = len(transitive_closure)
-    cluster_vec = -torch.ones(n, dtype=torch.long, device=transitive_closure.device)
-    not_visited = torch.ones(n, dtype=torch.bool, device=transitive_closure.device)
-
-    cluster_id = 0
-    rounds = 0
-    while not_visited.any() and rounds < n:
-        rounds += 1
-        pick = not_visited.nonzero()[0].squeeze()
-        visitors = transitive_closure[pick]
-        not_visited[visitors] = False
-        cluster_vec[visitors] = cluster_id # Profiling shows that this line is often the bottleneck
-        cluster_id += 1
-
-    clusters = [torch.where(cluster_vec == i)[0].sort().values for i in torch.unique(cluster_vec).sort().values]
-    
-    return clusters, cluster_vec
-
-# @torch.jit.script
 def cluster_overlap_boxes(
-        boxes : torch.Tensor, 
-        overlap_threshold : float=0.5,
-        overlap_fn : Callable[[torch.Tensor], torch.Tensor]=iou_boxes,
-        time : bool=False
+        boxes: torch.Tensor, 
+        overlap_threshold: float = 0.5,
+        overlap_fn: Callable[[torch.Tensor], torch.Tensor] = iou_boxes,
+        time: bool = False
     ) -> Tuple[List[torch.Tensor], torch.Tensor]:
-    """
-    Computes the connected components of a set of boxes, where boxes are connected if their overlap (e.g. IoU) is greater than the threshold.
-
-    Args:
-        boxes (`torch.Tensor`): A tensor of shape (n, 4), where n is the number of rectangles and the 4 columns are the x_min, y_min, x_max and y_max coordinates of the rectangles.
-        overlap_threshold (`float`, optional): The overlap (e.g. IoU) threshold for clustering. Defaults to 0.5.
-        time (`bool`, optional): UNUSED.
-
-    Returns:
-        out (`Tuple[List[torch.Tensor], torch.Tensor]`):
-            1. `List[torch.Tensor]`: A list of tensors, where each tensor contains the indices of the objects in a cluster.
-            2. `torch.Tensor`: A tensor of shape (n, ) containing the cluster index of each object.
-    """
-    ## Due to the how torch.jit.script works, we can't use branched timing, so the code is commented out
-    # if time:
-    #     stream = torch.cuda.current_stream(device=boxes.device)
-    #     start = torch.cuda.Event(enable_timing=True, blocking=False, interprocess=False)
-    #     end_adjacency = torch.cuda.Event(enable_timing=True, blocking=False, interprocess=False)
-    #     end_transitive = torch.cuda.Event(enable_timing=True, blocking=False, interprocess=False)
-    #     end_components = torch.cuda.Event(enable_timing=True, blocking=False, interprocess=False)
-    #     start.record(stream)
+    N, device = len(boxes), boxes.device
+    if N <= 1:
+        return [torch.arange(N, dtype=torch.long, device=device)], torch.zeros(N, dtype=torch.long, device=device)
     
-    adjacency_matrix = overlap_fn(boxes) >= overlap_threshold
-    # if time:
-    #     end_adjacency.record(stream)
+    # Chuncked adjacency matrix (memory-to-compute tradeoff)
+    CHUNK_SIZE = 2500 
+    rows_list = []
+    cols_list = []
     
-    transitive_closure = compute_transitive_closure(adjacency_matrix)
-    # if time:
-    #     end_transitive.record(stream)
-    
-    components = extract_components(transitive_closure)
-    # if time:
-    #     end_components.record(stream)
-    #     torch.cuda.synchronize(device=boxes.device)
-    #     total_time = start.elapsed_time(end_components)
-    #     print()
-    #     # F-strings are not compatible with torch.jit.script
-    #     print("Adjacency Matrix:", str(round(start.elapsed_time(end_adjacency) / total_time * 100, 2)) + "%")
-    #     print("Transitive Closure:", str(round(start.elapsed_time(end_transitive) / total_time * 100, 2)) + "%")
-    #     print("Components:", str(round(start.elapsed_time(end_components) / total_time * 100, 2)) + "%")
+    for i in range(0, N, CHUNK_SIZE):
+        chunk_i = boxes[i : i + CHUNK_SIZE]
+        for j in range(i, N, CHUNK_SIZE):
+            chunk_j = boxes[j : j + CHUNK_SIZE]
+            adj_chunk = overlap_fn(chunk_i, chunk_j) >= overlap_threshold
+            local_edges = adj_chunk.nonzero().cpu().numpy()
+            
+            if local_edges.size > 0:
+                # Offset the local indices to global indices
+                rows_list.append(local_edges[:, 0] + i)
+                cols_list.append(local_edges[:, 1] + j)
 
-    return components
+    # Build Sparse Graph (CPU)
+    if not rows_list:
+        # Degenerate case: all nodes are isolated
+        labels = np.arange(N)
+    else:
+        row, col = np.concatenate(rows_list), np.concatenate(cols_list)
+        data = np.ones(len(row), dtype=bool)
+        
+        sparse_graph = scipy.sparse.coo_matrix((data, (row, col)), shape=(N, N))
+        
+        # Find connected components (scipy handles the symmetry implicitly with directed=False)
+        _, labels = scipy.sparse.csgraph.connected_components(
+            sparse_graph, 
+            directed=False, 
+            return_labels=True
+        )
+
+    # Postprocess
+    cluster_vec = torch.from_numpy(labels).to(device=device, dtype=torch.long)
+    sorted_idx = torch.argsort(cluster_vec)
+    sorted_labels = cluster_vec[sorted_idx]
+    
+    _, counts = torch.unique(sorted_labels, return_counts=True)
+    groups = torch.split(sorted_idx, counts.tolist())
+
+    return list(groups), cluster_vec
+
 
 OVERLAP_FNS : dict[str, dict[str, Callable[[torch.Tensor], torch.Tensor]]] = {
     "polygon" : {
@@ -745,6 +591,7 @@ OVERLAP_FNS : dict[str, dict[str, Callable[[torch.Tensor], torch.Tensor]]] = {
         "ios" : ios_boxes
     }
 }
+
 def get_overlap_fn(geometry : str, metric : str):
     geometry, metric = geometry.lower().strip(), metric.lower().strip()
     if geometry not in OVERLAP_FNS:
