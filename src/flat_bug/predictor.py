@@ -1101,7 +1101,8 @@ class TensorPredictions:
             fast: bool=False,
             mask_crops: bool=False,
             identifier: Optional[str]=None, 
-            basename: Optional[str]=None
+            basename: Optional[str]=None,
+            wait: bool=False
         ) -> Optional[str]:
         """
         Saves the serialized prediction results, crops, and overview to the given output directory.
@@ -1122,6 +1123,8 @@ class TensorPredictions:
             identifier (`str | None`, optional): An identifier for the serialized data. Defaults to None.
             basename (`str | None`, optional): The base name of the image. Defaults to None. 
                 If None, the base name is extracted from the image path, which must be set in this case.
+            wait (`bool`, optional): If true `save` blocks execution until results are finished saving, 
+                otherwise results will be saved asynchronously.
         
         Returns:
             `str`: The path to the directory containing the serialized data - the crops and overview image(s) are also saved here by default. \\
@@ -1174,6 +1177,9 @@ class TensorPredictions:
             metadata_path = os.path.join(metadata_directory, f'metadata_{basename}_UUID_{identifier}')
             # Serialize the data to the metadata path
             _executor.submit(self.serialize, outpath=metadata_path, identifier=identifier)
+
+        if wait:
+            _executor.flush()
 
         return prediction_directory if prediction_directory_is_used else None
 
