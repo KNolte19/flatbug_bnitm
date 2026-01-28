@@ -732,39 +732,7 @@ def nms_boxes(
     Wrapper for `torchvision.ops.nms`; the standard non-maximum suppression algorithm.
     """
     if overlap_fn is None or isinstance(overlap_fn, str) and (overlap_fn := overlap_fn.strip().lower()) == "iou":
-        return torchvision.ops.nms(boxes, scores, overlap_threshold)
+        return torchvision.ops.nms(boxes, scores, overlap_threshold).sort().values
     if isinstance(overlap_fn, str):
         overlap_fn = get_overlap_fn("box", overlap_fn)
     return base_nms_(boxes, overlap_fn=overlap_fn, scores=scores, overlap_threshold=overlap_fn, return_indices=True)
-
-def detect_duplicate_boxes(
-        boxes : torch.Tensor, 
-        scores : torch.Tensor, 
-        margin : int=9, 
-        return_indices : bool=False
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-    """
-    Duplicate detection algorithm based on the standard non-maximum suppression algorithm.
-
-    Algorithm overview:
-        * Instead of IoU we use the maximum difference between the sides of the boxes as the metric for determining whether two boxes are duplicates.
-        * To make this metric compatible with NMS we negate the metric and the threshold, such that large side difference are very negative and thus below the threshold.
-    """
-    def negated_max_side_difference(
-            box : torch.Tensor, 
-            boxs : torch.Tensor, 
-            dtype : None=None
-        ) -> torch.Tensor:
-        """
-        Calculates the **NEGATED** maximum difference between the sides of box1 and boxs.
-
-        Args:
-            box (`torch.Tensor`): A tensor of shape (4, ) representing the box in the format [x_min, y_min, x_max, y_max].
-            boxs (`torch.Tensor`): A tensor of shape (n, 4) representing the boxes in the format [x_min, y_min, x_max, y_max].
-            dtype (`None`, optional): OBS: Unused, only here for compatibility with the `iou_fun` signature.
-
-        Returns:
-            out (`torch.Tensor`): A tensor of shape (n, ) representing the **NEGATED** maximum difference between the sides of box1 and each box in boxs.
-        """
-        return -(boxs - box).abs().max(dim=1).values
-    return base_nms_(boxes, negated_max_side_difference, scores, overlap_threshold=-margin, return_indices=return_indices, strict=False)

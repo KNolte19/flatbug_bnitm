@@ -34,7 +34,7 @@ from flat_bug.geometric import (
     scale_contour,
     simplify_contour,
 )
-from flat_bug.nms import detect_duplicate_boxes, nms_masks, nms_polygons
+from flat_bug.nms import nms_boxes, nms_masks, nms_polygons
 from flat_bug.yolo_helpers import (
     ResultsWithTiles,
     merge_tile_results,
@@ -154,7 +154,7 @@ class TensorPredictions:
 
     `TensorPredictions` also allows for easy conversion from mask to contours and back, plotting of the results, and (de-)serialization to save and load the results to/from disk.
     """
-    BOX_IS_EQUAL_MARGIN = 0  # How many pixels the boxes can differ by and still be considered equal? Used for removing duplicates before merging overlapping masks.
+    DUPLICATE_THRESHOLD = 1
     PREFER_POLYGONS = True  # If True, will use shapely Polygons instead of masks for NMS and drawing
     # These are simply initialized here to decrease clutter in the __init__ function and arguments
     mask_width = None
@@ -244,11 +244,10 @@ class TensorPredictions:
         self.scales = [p.scale for p in predictions for _ in range(len(p))]  # N
 
         ## Duplicate removal ##
-        # Calculate indices of non-duplicate boxes - prioritzed by resolution
-        valid_indices = detect_duplicate_boxes(
+        valid_indices = nms_boxes(
             self.boxes,
-            torch.tensor(self.scales, dtype=self.dtype, device=self.device),
-            margin=self.BOX_IS_EQUAL_MARGIN, return_indices=True
+            self.confs,
+            overlap_threshold=self.DUPLICATE_THRESHOLD
         )
         # Subset the boxes and confidences to the valid indices
         self.boxes = self.boxes[valid_indices]
