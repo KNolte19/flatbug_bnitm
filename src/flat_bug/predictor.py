@@ -73,6 +73,7 @@ class AsyncExecutor:
                         future.set_result(fn())
                     except Exception as e: 
                         future.set_exception(e)
+                        logger.error(f"Async task failed: {e}", exc_info=True)
             finally:
                 with self._lock: 
                     self._active.discard(future)
@@ -638,9 +639,10 @@ class TensorPredictions:
             confidence : bool=True, 
             outpath : Optional[str]=None, 
             scale : float=1,
-            contour_color : Tuple[int, int, int] = (255, 0, 0),
-            box_color : Tuple[int, int, int] = (0, 0, 0),
-            alpha : float = 0.3
+            contour_color : Tuple[int, int, int]=(255, 0, 0),
+            box_color : Tuple[int, int, int]=(0, 0, 0),
+            alpha : float=0.3,
+            wait : bool=False
         ):
         """
         Visualizes `flatbug` predictions from a `TensorPredictions` object.
@@ -661,13 +663,20 @@ class TensorPredictions:
         """
         params = locals()
         params.pop("self", None)
+        params.pop("wait", None)
+        data = {
+            "image" : self.image_path or self.image.detach().cpu().clone(),
+            "bboxes" : self.boxes.detach().cpu().clone(),
+            "contours" : [poly.detach().cpu().clone() for poly in self.polygons],
+            "confs" : self.confs.detach().cpu().clone(),
+        }
         if outpath not in [None, ""] and outpath.lower().endswith(".svg"):
-            retval = self._plot_svg(**params)
+            retval = _executor.submit(TensorPredictions._plot_svg, **data, **params)
         else:
-            retval = self._plot_image(**params)
-        if retval is None:
-            return outpath
-        return retval
+            retval = _executor.submit(TensorPredictions._plot_image, **data, **params)
+        if wait:
+            _executor.flush()
+        return outpath or retval
 
     @staticmethod
     def _box_to_svg_element(
@@ -756,8 +765,12 @@ class TensorPredictions:
             f'fill:{fill_colour};fill-opacity:{alpha}" d="M{d_str} Z"/>'
         )
 
+    @staticmethod
     def _plot_svg(
-            self, 
+            image : torch.Tensor | str,
+            bboxes : torch.Tensor,
+            contours : torch.Tensor,
+            confs : torch.Tensor,
             linewidth : int=2, 
             masks : bool=True, 
             boxes : bool=True, 
@@ -768,12 +781,18 @@ class TensorPredictions:
             box_color : Tuple[int, int, int] = (0, 0, 0),
             alpha : float = 0.3
         ):
-        # Convert pred.image (a torch tensor) to a NumPy array and convert RGB -> BGR.
-        image = torchvision.transforms.ConvertImageDtype(torch.uint8)(self.image).permute(1, 2, 0).cpu().numpy()
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         embed_jpeg = True
+
+        if isinstance(image, str):
+            image = decode_image(
+                input=image, 
+                mode=ImageReadMode.RGB, 
+                apply_exif_orientation=True
+            )
+        image = torchvision.transforms.ConvertImageDtype(torch.uint8)(image).permute(1, 2, 0).cpu().numpy()
         if scale != 1:
             image = cv2.resize(image, (0, 0), fx=scale, fy=scale)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
         try:
             height, width = image.shape[0:2]
@@ -792,13 +811,13 @@ class TensorPredictions:
                 content.append('<image %s width="%i" height="%i" x="0" y="0" xlink:href="data:image/jpeg;base64,%s"/>' % \
                         (desc, width, height, str(encoded_string, 'utf-8')))
             if masks:
-                for cont in self.contours:
-                    content.append(self._contour_to_svg_element(cont, scale=scale, color=contour_color, linewidth=linewidth, alpha=alpha))
+                for cont in contours:
+                    content.append(TensorPredictions._contour_to_svg_element(cont, scale=scale, color=contour_color, linewidth=linewidth, alpha=alpha))
             if boxes:
-                for box, conf in zip(self.boxes, self.confs):
+                for box, conf in zip(bboxes, confs):
                     lbl = f'{conf.item():.1%}' if confidence else None
                     # Pass the background image so the function can sample the area behind the label.
-                    content.append(self._box_to_svg_element(box, scale=scale, color=box_color, linewidth=linewidth, label=lbl, background_image=image, label_fontsize=text_height))
+                    content.append(TensorPredictions._box_to_svg_element(box, scale=scale, color=box_color, linewidth=linewidth, label=lbl, background_image=image, label_fontsize=text_height))
             content.append('</svg>')
             
             if outpath:
@@ -811,8 +830,12 @@ class TensorPredictions:
         
         return content
 
+    @staticmethod
     def _plot_image(
-            self, 
+            image : torch.Tensor | str,
+            bboxes : torch.Tensor,
+            contours : torch.Tensor,
+            confs : torch.Tensor,
             linewidth : int=2, 
             masks : bool=True, 
             boxes : bool=True, 
@@ -823,19 +846,25 @@ class TensorPredictions:
             box_color : Tuple[int, int, int] = (0, 0, 0),
             alpha : float = 0.3
         ) -> Optional[cv2.UMat]:
-        # Convert torch tensor to numpy array
-        image = torchvision.transforms.ConvertImageDtype(torch.uint8)(self.image).permute(1, 2, 0).cpu().numpy()
-        image : cv2.UMat = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        if isinstance(image, str):
+            image = decode_image(
+                input=image, 
+                mode=ImageReadMode.RGB, 
+                apply_exif_orientation=True
+            )
+        image = torchvision.transforms.ConvertImageDtype(torch.uint8)(image).permute(1, 2, 0).cpu().numpy()
         if scale != 1:
             image = cv2.resize(image, (0, 0), fx=scale, fy=scale)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
         # Convert colors from RGB to BGR
         contour_color = contour_color[::-1]
         box_color = box_color[::-1]
 
-        if len(self) > 0:
+        if len(contours) > 0:
             # Draw masks
             if masks:
-                contours = [simplify_contour((c * scale).round().to(torch.int32).cpu().numpy(), scale / 2) for c in self.contours]
+                contours = [simplify_contour((c * scale).round().to(torch.int32).cpu().numpy(), scale / 2) for c in contours]
                 ih, iw = image.shape[:2]
                 _alpha = int(255 * alpha)
 
@@ -858,7 +887,7 @@ class TensorPredictions:
 
             # Draw boxes and confidences
             if boxes:
-                for box, conf in zip(self.boxes, self.confs):
+                for box, conf in zip(bboxes, confs):
                     box = (box * scale)
                     box[:2] = box[:2].floor()
                     box[2:] = box[2:].ceil()
@@ -914,9 +943,9 @@ class TensorPredictions:
                 resize_mask(mask, self.image.shape[1:])[box[1]:box[3], box[0]:box[2]]
                 for mask, box in zip(self.masks, self.boxes.long())
             ]
-        
+
+    @staticmethod    
     def _save_1_crop(
-            self,
             crop : torch.Tensor,
             mask : Union[torch.Tensor, None],
             path : str,
@@ -954,7 +983,9 @@ class TensorPredictions:
         crop_paths = [os.path.join(outdir, f"crop_{basename}_CROPNUMBER_{i}_UUID_{identifier}{image_ext}") for i in range(len(crops))]
 
         for crop, mask, path in zip(crops, crop_masks, crop_paths):
-            _executor.submit(self._save_1_crop, crop, mask, path)
+            if isinstance(mask, torch.Tensor):
+                mask = mask.detach().cpu().clone()
+            _executor.submit(self._save_1_crop, crop.detach().cpu().clone(), mask, path)
         if wait:
             _executor.flush()
 
@@ -1168,12 +1199,11 @@ class TensorPredictions:
             # The overview path is then constructed as a .jpg file in the overview directory with the name overview_{base_name}.jpg
             overview_path = os.path.join(overview_directory, f"overview_{basename}_UUID_{identifier}.jpg")
             # Save the overview image to the overview path
-            if not fast:
-                _executor.submit(self.plot, outpath=overview_path, linewidth=2, scale=1)
-            else:
-                max_dim = max(self.image.shape[1:])
-                fast_scale = min(1 / 2, 3072 / max_dim)
-                _executor.submit(self.plot, outpath=overview_path, linewidth=1, scale=fast_scale)
+            scale, linewidth = 1, 2
+            if fast:
+                scale = min(1 / 2, 3072 / max(self.image.shape[1:]))
+                linewidth = 1
+            self.plot(outpath=overview_path, linewidth=linewidth, scale=scale)
 
         # Save crops
         if crops:
@@ -1192,8 +1222,8 @@ class TensorPredictions:
             assert os.path.isdir(crop_directory), RuntimeError(f"Invalid path for metadata: {metadata_directory}")
             # The metadata path is then constructed as a .json file in the metadata directory with the name metadata_{base_name}_id_{identifier}.<EXT>
             metadata_path = os.path.join(metadata_directory, f'metadata_{basename}_UUID_{identifier}')
-            # Serialize the data to the metadata path
-            _executor.submit(self.serialize, outpath=metadata_path, identifier=identifier)
+            # Serialize the data to the metadata path (we don't do this as a future since it is fast, and then we don't need to copy data)
+            self.serialize(outpath=metadata_path, identifier=identifier)
 
         if wait:
             _executor.flush()

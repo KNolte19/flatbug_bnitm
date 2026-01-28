@@ -298,9 +298,9 @@ def predict(
                 )
                 if result_directory is not None:
                     basename = os.path.splitext(os.path.basename(f))[0]
-                    metadata_directory = metadata if isinstance(metadata, str) else result_directory
-                    overview_directory = overviews if isinstance(overviews, str) else result_directory
-                    # crop_directory = crops if isinstance(crops, str) else os.path.join(result_directory, crops)
+                    metadata_directory = metadata if isinstance(metadata, str) else metadata and result_directory
+                    overview_directory = overviews if isinstance(overviews, str) else overviews and result_directory
+                    # crop_directory = crops if isinstance(crops, str) else crops and os.path.join(result_directory, crops)
                     all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{UUID}.json'))
                     if isVideo and overviews:
                         frames.append(os.path.join(overview_directory, f"overview_{basename}_UUID_{UUID}.jpg"))

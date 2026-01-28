@@ -528,6 +528,10 @@ def cluster_overlap_boxes(
         overlap_fn: Callable[[torch.Tensor], torch.Tensor] = iou_boxes,
         time: bool = False
     ) -> Tuple[List[torch.Tensor], torch.Tensor]:
+    """Cluster boxes via connected components.
+    
+    Note: Implementation relies on ``overlap_fn`` being symmetric (e.g. IoU/IoS).
+    """
     N, device = len(boxes), boxes.device
     if N <= 1:
         return [torch.arange(N, dtype=torch.long, device=device)], torch.zeros(N, dtype=torch.long, device=device)
