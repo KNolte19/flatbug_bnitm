@@ -301,7 +301,7 @@ def predict(
                     metadata_directory = metadata if isinstance(metadata, str) else result_directory
                     overview_directory = overviews if isinstance(overviews, str) else result_directory
                     # crop_directory = crops if isinstance(crops, str) else os.path.join(result_directory, crops)
-                    all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{UUID}'))
+                    all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{UUID}.json'))
                     if isVideo and overviews:
                         frames.append(os.path.join(overview_directory, f"overview_{basename}_UUID_{UUID}.jpg"))
         except Exception as e:
