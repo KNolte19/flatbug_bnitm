@@ -3,9 +3,9 @@ import base64
 import json
 import os
 import pathlib
-import threading
-from concurrent.futures import Future, wait
 import queue
+import threading
+from concurrent.futures import Future, wait, as_completed
 from typing import Any, List, Optional, Self, Tuple, Union
 
 import cv2
@@ -17,6 +17,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 from torch._prims_common import DeviceLikeType
 from torchvision.io import ImageReadMode, decode_image
+from tqdm.auto import tqdm
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
 
@@ -45,7 +46,7 @@ from flat_bug.yolo_helpers import (
 
 
 class AsyncExecutor:
-    def __init__(self, max_workers=None, backlog=1000):
+    def __init__(self, max_workers=None, backlog=10000):
         self.limit = max_workers or max(1, min(16, (os.cpu_count() or 2) // 2))
         self._queue = queue.Queue(maxsize=backlog)
         self._threads, self._active, self._lock = [], set(), threading.Lock()
@@ -88,11 +89,18 @@ class AsyncExecutor:
         self._queue.put((lambda: fn(*args, **kwargs), future))
         return future
 
-    def flush(self):
+    def flush(self, progress=False):
         """Wait for all pending futures to finish."""
         with self._lock: 
             pending = list(self._active)
-        wait(pending)
+        if not pending: 
+            return
+
+        if progress and tqdm:
+            for _ in tqdm(as_completed(pending), total=len(pending), desc="Finishing pending executions."): 
+                pass
+        else:
+            wait(pending)
 
 _executor = AsyncExecutor()
 
@@ -925,7 +933,8 @@ class TensorPredictions:
             outdir : str, 
             basename : Optional[str]=None, 
             mask : bool=False, 
-            identifier : str=None
+            identifier : str=None,
+            wait : bool=False
         ) -> List[Union[str, torch.Tensor]]:
         if outdir is None or not os.path.exists(outdir) or not os.path.isdir(outdir):
             raise RuntimeError(f"Invalid outdir {outdir}, does not exist or is not a directory")
@@ -945,7 +954,12 @@ class TensorPredictions:
             crop_masks = [None] * len(crops)
         crop_paths = [os.path.join(outdir, f"crop_{basename}_CROPNUMBER_{i}_UUID_{identifier}{image_ext}") for i in range(len(crops))]
 
-        return [self._save_1_crop(crop, mask, path) for crop, mask, path in zip(crops, crop_masks, crop_paths)]        
+        for crop, mask, path in zip(crops, crop_masks, crop_paths):
+            _executor.submit(self._save_1_crop, crop, mask, path)
+        if wait:
+            _executor.flush()
+
+        return crop_paths
     
     @property
     def json_data(self):
@@ -1169,7 +1183,7 @@ class TensorPredictions:
             os.makedirs(crop_directory, exist_ok=True)
             assert os.path.isdir(crop_directory), RuntimeError(f"Invalid path for crops: {crop_directory}")
             # Save the crops to the crops path
-            _executor.submit(self.save_crops, outdir=crop_directory, basename=basename, mask=mask_crops, identifier=identifier)
+            self.save_crops(outdir=crop_directory, basename=basename, mask=mask_crops, identifier=identifier)
 
         # Save json
         if metadata:

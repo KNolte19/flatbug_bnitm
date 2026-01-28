@@ -311,7 +311,7 @@ def predict(
             raise e
     if verbose:
         logger.info("Finalizing results...")
-    prediction_executor.flush()
+    prediction_executor.flush(progress=True)
     if verbose:
         logger.info("All results finished.")
     if not no_compiled_coco:
