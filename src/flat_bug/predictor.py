@@ -4,8 +4,9 @@ import json
 import os
 import pathlib
 import threading
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, List, Optional, Self, Tuple, Union
+from concurrent.futures import Future, wait
+import queue
+from typing import Any, List, Optional, Self, Tuple, Union
 
 import cv2
 import numpy as np
@@ -44,53 +45,56 @@ from flat_bug.yolo_helpers import (
 
 
 class AsyncExecutor:
-    def __init__(self, max_workers: Optional[int] = None, max_backlog: int = 1000):
-        if max_workers is None:
-            max_workers = max(1, min(16, (os.cpu_count() or 2) // 2))
-        
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix="AsyncSaver"
-        )
-        
-        for thread in self._executor._threads:
-            thread.daemon = True
+    def __init__(self, max_workers=None, backlog=1000):
+        self.limit = max_workers or max(1, min(16, (os.cpu_count() or 2) // 2))
+        self._queue = queue.Queue(maxsize=backlog)
+        self._threads, self._active, self._lock = [], set(), threading.Lock()
+        atexit.register(self.flush)
 
-        self._semaphore = threading.BoundedSemaphore(max_backlog + max_workers)
-        atexit.register(self.shutdown)
+    def _init_pool(self):
+        with self._lock:
+            if not self._threads:
+                for i in range(self.limit):
+                    thread = threading.Thread(
+                        target=self._work, 
+                        daemon=True, 
+                        name=f"Async-{i}"
+                    )
+                    thread.start()
+                    self._threads.append(thread)
 
-    def shutdown(self):
-        """Explicitly shutdown without double-waiting if possible."""
-        self._executor.shutdown(wait=True, cancel_futures=True)
+    def _work(self):
+        while True:
+            fn, future = self._queue.get()
+            try:
+                if future.set_running_or_notify_cancel():
+                    try: 
+                        future.set_result(fn())
+                    except Exception as e: 
+                        future.set_exception(e)
+            finally:
+                with self._lock: 
+                    self._active.discard(future)
+                self._queue.task_done()
 
-    def submit(self, fn : Callable, *args, **kwargs):
-        """Submit an async function call.
-        
-        Args:
-            fn: Function to call.
-            *args: Positional arguments passed to fn.
-            **kwargs: Keyword arguments passed to fn.
-        
-        Returns:
-            out: Return value of fn.
-        """
-        self._semaphore.acquire()
-        try:
-            future = self._executor.submit(fn, *args, **kwargs)
-            future.add_done_callback(lambda _: self._semaphore.release())
-            return future
-        except Exception:
-            self._semaphore.release()
-            raise
+    def submit(self, fn, *args, **kwargs):
+        """Submit a call to be executed asynchronously."""
+        if not self._threads: 
+            self._init_pool()
+        future = Future()
+        with self._lock: 
+            self._active.add(future)
+        # Blocks here if backlog is full
+        self._queue.put((lambda: fn(*args, **kwargs), future))
+        return future
 
     def flush(self):
-        """Blocks until all currently queued tasks are finished."""
-        self.submit(lambda: None).result()
+        """Wait for all pending futures to finish."""
+        with self._lock: 
+            pending = list(self._active)
+        wait(pending)
 
 _executor = AsyncExecutor()
-
-# Usage inside your module:
-# saver = AsyncExecutor(max_backlog=50)
 
 # Class for containing the results from a single _detect_instances call - This should probably not be its own class, but just a TensorPredictions object with a single element instead, but this would require altering the TensorPredictions._combine_predictions function to handle a single element differently or pass a flag or something
 class Prepared_Results:
