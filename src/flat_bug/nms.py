@@ -73,8 +73,8 @@ def ios_boxes(
     areas1 = torchvision.ops.box_area(rectangles)
     areas2 = torchvision.ops.box_area(other_rectangles)
     sareas = torch.minimum(
-        areas1.unsqueeze(0).expand(len(areas2), -1),
-        areas2.unsqueeze(1).expand(-1, len(areas1))
+        areas1.unsqueeze(1).expand(-1, len(areas2)),
+        areas2.unsqueeze(0).expand(len(areas1), -1)
     )
     intersections, unions = _box_inter_union(rectangles, other_rectangles)
     ios = intersections / (sareas + 1e-6)
