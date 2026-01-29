@@ -55,8 +55,9 @@ class TestTensorPredictions(unittest.TestCase):
         image_path = os.path.join(os.path.dirname(__file__), "assets", f"{ASSET_NAME}.jpg")
         check_file_with_remote_fallback(image_path)
         tp.image = read_image(image_path) * 255
+        tp.image_path = image_path
         with tempfile.TemporaryDirectory() as tmp_directory:
-            save_dir = tp.save(tmp_directory, mask_crops=True)
+            save_dir = tp.save(tmp_directory, mask_crops=True, wait=True)
             self.assertTrue(os.path.exists(os.path.join(save_dir, "crops")))
             crops = glob(os.path.join(save_dir, "crops", "*"))
             n_crops = len(crops)

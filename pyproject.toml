@@ -21,7 +21,8 @@ dependencies = [
     "torchvision>=0.17.0",
     "ultralytics>=8.2.16,<=8.3.124",
     "shapely>=2.0.2",
-    "scikit-optimize>=0.10.1"
+    "scikit-optimize>=0.10.1",
+    "scipy>=1.14.1"
 ]
 keywords=['deep learning', 'object detection', 'instance segmentation', 'arthropods']
 
