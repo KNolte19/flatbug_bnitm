@@ -43,7 +43,8 @@ import argparse
 import glob
 import os
 import re
-from typing import List, Optional
+import uuid
+from typing import Optional
 
 import torch
 from tqdm import tqdm
@@ -56,7 +57,13 @@ from flat_bug.predictor import _executor as prediction_executor
 
 
 def cli_args():
-    args_parse = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    args_parse = argparse.ArgumentParser(
+        prog="fb_predict",
+        description="""\
+            Perform instance detection and segmentation with flatbug on
+            one or more images or a video.""",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
 
     args_parse.add_argument("-i", "--input", type=str, dest="input", required=True,
                             help="A image file or a directory of image files")
@@ -78,6 +85,7 @@ def cli_args():
     args_parse.add_argument("-d", "--dtype", type=str, default="float16", help="Which dtype to use for inference. Default is 'float16'.")
     args_parse.add_argument("-f", "--fast", action="store_true", help="Use fast mode.")
     args_parse.add_argument("--config", type=str, default=None, help="The config file.")
+    args_parse.add_argument("--id", type=str, default=None, required=False, help="Identifier (ID) for prediction run.")
     args_parse.add_argument("--no-crops", action="store_true", help="Do not save the crops.")
     args_parse.add_argument("--no-overviews", action="store_true", help="Do not save the overviews.")
     args_parse.add_argument("--no-metadata", action="store_true", help="Do not save the metadata.")
@@ -104,6 +112,7 @@ def predict(
         dtype : str="float16",
         fast : bool=False,
         config : Optional[str]=None,
+        id : Optional[str]=None,
         no_crops : bool=False,
         no_overviews : bool=False,
         no_metadata : bool=False,
@@ -122,7 +131,7 @@ def predict(
         input = os.path.normpath(input)
     output_dir = os.path.normpath(output_dir)
     model_weights = os.path.normpath(model_weights)
-    if not config is None:
+    if config is not None:
         config = os.path.normpath(config)
 
     if isERDA:
@@ -152,13 +161,15 @@ def predict(
     
     dtype = dtype
     
-    if not config is None:
+    if config is not None:
         config = read_cfg(config)
     else:
         config = DEFAULT_CFG
     if nms_metric is not None:
         config["OVERLAP_METRIC"] = nms_metric
     
+    if id is None:
+        id = str(uuid.uuid4())
     
     crops = not no_crops
     metadata = not no_metadata
@@ -269,8 +280,6 @@ def predict(
             file_iter = file_iter[:max_images]
 
     all_json_results = []
-
-    UUID = "ChangeThisTEMPORARY" # fixme, this is a temporary solution, but we should use a UUID for each run
     
     pbar = tqdm(enumerate(file_iter), total=len(file_iter), desc="Processing images", dynamic_ncols=True, unit="image")
     for i, f in pbar:
@@ -294,16 +303,16 @@ def predict(
                     metadata = metadata,
                     crops = crops,
                     mask_crops = True,
-                    identifier = UUID, #str(uuid.uuid4()),
+                    identifier = id,
                 )
                 if result_directory is not None:
                     basename = os.path.splitext(os.path.basename(f))[0]
-                    metadata_directory = metadata if isinstance(metadata, str) else metadata and result_directory
-                    overview_directory = overviews if isinstance(overviews, str) else overviews and result_directory
-                    # crop_directory = crops if isinstance(crops, str) else crops and os.path.join(result_directory, crops)
-                    all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{UUID}.json'))
+                    metadata_directory = metadata if isinstance(metadata, str) else result_directory
+                    overview_directory = overviews if isinstance(overviews, str) else result_directory
+                    # crop_directory = crops if isinstance(crops, str) else os.path.join(result_directory, crops)
+                    all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{id}.json'))
                     if isVideo and overviews:
-                        frames.append(os.path.join(overview_directory, f"overview_{basename}_UUID_{UUID}.jpg"))
+                        frames.append(os.path.join(overview_directory, f"overview_{basename}_UUID_{id}.jpg"))
         except Exception as e:
             logger.error(f"Issue whilst processing {f}")
             #fixme, what is going on with /home/quentin/todo/toup/20221008_16-01-04-226084_raw_jpg.rf.0b8d397da3c47408694eeaab2cde06e5.jpg?

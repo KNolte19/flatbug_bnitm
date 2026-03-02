@@ -105,7 +105,10 @@ class AsyncExecutor:
 
 _executor = AsyncExecutor()
 
-# Class for containing the results from a single _detect_instances call - This should probably not be its own class, but just a TensorPredictions object with a single element instead, but this would require altering the TensorPredictions._combine_predictions function to handle a single element differently or pass a flag or something
+
+## Class for containing the results from a single _detect_instances call
+# This should probably not be its own class, but just a TensorPredictions object with a single element instead, 
+# but this would require altering the TensorPredictions._combine_predictions function to handle a single element differently or pass a flag or something
 class Prepared_Results:
     def __init__(self, predictions: "ResultsWithTiles", scale: Tuple[float, float], device, dtype):
         self.wh_scale = torch.tensor(scale, device=device, dtype=dtype).unsqueeze(0)
@@ -215,7 +218,14 @@ class TensorPredictions:
             self._combine_predictions(predictions)
         else:
             # If there are no predictions, set other attributes to empty tensors or lists - ensures correct type and device for the attributes when there are no predictions
-            self.masks, self.polygons, self.boxes, self.confs, self.classes, self.scales = torch.empty((0, 0), device=self.device, dtype=self.dtype), [], torch.empty((0, 4), device=self.device, dtype=self.dtype), torch.empty(0, device=self.device, dtype=self.dtype), torch.empty(0, device=self.device, dtype=self.dtype), []
+            self.masks, self.polygons, self.boxes, self.confs, self.classes, self.scales = (
+                torch.empty((0, 0), device=self.device, dtype=self.dtype), 
+                [], 
+                torch.empty((0, 4), device=self.device, dtype=self.dtype), 
+                torch.empty(0, device=self.device, dtype=self.dtype), 
+                torch.empty(0, device=self.device, dtype=self.dtype), 
+                []
+            )
 
         if self.time and len(predictions) > 0:
             end.record()
