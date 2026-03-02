@@ -736,7 +736,10 @@ def nms_boxes(
     Wrapper for `torchvision.ops.nms`; the standard non-maximum suppression algorithm.
     """
     if overlap_fn is None or isinstance(overlap_fn, str) and (overlap_fn := overlap_fn.strip().lower()) == "iou":
-        with torch.autocast(device_type=boxes.device.type, dtype=boxes.dtype):
+        if boxes.dtype != torch.float32:
+            with torch.autocast(device_type=boxes.device.type, dtype=boxes.dtype):
+                return torchvision.ops.nms(boxes, scores, overlap_threshold).sort().values
+        else:
             return torchvision.ops.nms(boxes, scores, overlap_threshold).sort().values
     if isinstance(overlap_fn, str):
         overlap_fn = get_overlap_fn("box", overlap_fn)

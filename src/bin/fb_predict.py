@@ -82,7 +82,7 @@ def cli_args():
     args_parse.add_argument("--single-scale", action="store_true", help="Use single scale.")
     args_parse.add_argument("-M", "--nms_metric", type=str, default=None, help="Overlap metric to use for NMS, if specified this will override the config. Default is 'IoU', currently only 'IoS' is also available.")
     args_parse.add_argument("-g", "--device", "--gpu", type=str, default="auto", help="Which device to use for inference.")
-    args_parse.add_argument("-d", "--dtype", type=str, default="float16", help="Which dtype to use for inference. Default is 'float16'.")
+    args_parse.add_argument("-d", "--dtype", type=str, default=None, help="Which dtype to use for inference. Default is 'float16' for CUDA and 'float32' for CPU.")
     args_parse.add_argument("-f", "--fast", action="store_true", help="Use fast mode.")
     args_parse.add_argument("--config", type=str, default=None, help="The config file.")
     args_parse.add_argument("--id", type=str, default=None, required=False, help="Identifier (ID) for prediction run.")
@@ -109,7 +109,7 @@ def predict(
         single_scale : bool=False,
         nms_metric : str="IoU",
         device : str="auto",
-        dtype : str="float16",
+        dtype : str=None,
         fast : bool=False,
         config : Optional[str]=None,
         id : Optional[str]=None,
@@ -168,7 +168,17 @@ def predict(
     else:
         device = f"cuda:{device}" if device.isdigit() else device
         device = torch.ones(1).to(torch.device(device)).device
-    
+    device_type = set([d.type for d in (device if isinstance(device, list) else [device])])
+    if len(device_type) != 1:
+        raise RuntimeError("Unable to resolve device type.")
+    device_type = list(device_type)[0].lower().strip()
+    if device_type not in ["cpu", "cuda"]:
+        logger.warning(f"Unsupported device type: {device_type} - unexpected behavior or crashes may arise.")
+    if dtype is None:
+        if device_type == "cpu":
+            dtype = "float32"
+        else:
+            dtype = "float16"
     dtype = dtype
     
     if config is not None:
