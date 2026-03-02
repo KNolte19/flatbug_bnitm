@@ -43,6 +43,7 @@ import argparse
 import glob
 import os
 import re
+import uuid
 from typing import Optional
 
 import torch
@@ -52,10 +53,17 @@ from flat_bug import logger, set_log_level
 from flat_bug.coco_utils import fb_to_coco
 from flat_bug.config import DEFAULT_CFG, read_cfg
 from flat_bug.predictor import Predictor
+from flat_bug.predictor import _executor as prediction_executor
 
 
 def cli_args():
-    args_parse = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    args_parse = argparse.ArgumentParser(
+        prog="fb_predict",
+        description="""\
+            Perform instance detection and segmentation with flatbug on
+            one or more images or a video.""",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
 
     args_parse.add_argument("-i", "--input", type=str, dest="input", required=True,
                             help="A image file or a directory of image files")
@@ -72,11 +80,12 @@ def cli_args():
     args_parse.add_argument("-s", "--scale-before", type=float, dest="scale_before", default=1.0,
                             help="Downscale the image before detection, but crops from the original image.")
     args_parse.add_argument("--single-scale", action="store_true", help="Use single scale.")
-    args_parse.add_argument("-g", "--gpu", type=str, help=argparse.SUPPRESS)
-    args_parse.add_argument("-D", "--device", type=str, default="auto", help="Which device to use for inference. Defaults to 'auto'; automatically choosing 'cuda:0' if CUDA is available, otherwise 'cpu'.")
+    args_parse.add_argument("-M", "--nms_metric", type=str, default=None, help="Overlap metric to use for NMS, if specified this will override the config. Default is 'IoU', currently only 'IoS' is also available.")
+    args_parse.add_argument("-g", "--device", "--gpu", type=str, default="auto", help="Which device to use for inference.")
     args_parse.add_argument("-d", "--dtype", type=str, default="float16", help="Which dtype to use for inference. Default is 'float16'.")
     args_parse.add_argument("-f", "--fast", action="store_true", help="Use fast mode.")
     args_parse.add_argument("--config", type=str, default=None, help="The config file.")
+    args_parse.add_argument("--id", type=str, default=None, required=False, help="Identifier (ID) for prediction run.")
     args_parse.add_argument("--no-crops", action="store_true", help="Do not save the crops.")
     args_parse.add_argument("--no-overviews", action="store_true", help="Do not save the overviews.")
     args_parse.add_argument("--no-metadata", action="store_true", help="Do not save the metadata.")
@@ -98,10 +107,12 @@ def predict(
         recursive : bool=False,
         scale_before : float=1.0,
         single_scale : bool=False,
+        nms_metric : str="IoU",
         device : str="auto",
         dtype : str="float16",
         fast : bool=False,
         config : Optional[str]=None,
+        id : Optional[str]=None,
         no_crops : bool=False,
         no_overviews : bool=False,
         no_metadata : bool=False,
@@ -123,7 +134,7 @@ def predict(
         input = os.path.normpath(input)
     output_dir = os.path.normpath(output_dir)
     model_weights = os.path.normpath(model_weights)
-    if not config is None:
+    if config is not None:
         config = os.path.normpath(config)
 
     if isERDA:
@@ -160,12 +171,15 @@ def predict(
     
     dtype = dtype
     
-    if not config is None:
+    if config is not None:
         config = read_cfg(config)
     else:
         config = DEFAULT_CFG
-    if verbose:
-        config["TIME"] = True
+    if nms_metric is not None:
+        config["OVERLAP_METRIC"] = nms_metric
+    
+    if id is None:
+        id = str(uuid.uuid4())
     
     crops = not no_crops
     metadata = not no_metadata
@@ -271,8 +285,6 @@ def predict(
             file_iter = file_iter[:max_images]
 
     all_json_results = []
-
-    UUID = "ChangeThisTEMPORARY" # fixme, this is a temporary solution, but we should use a UUID for each run
     
     pbar = tqdm(enumerate(file_iter), total=len(file_iter), desc="Processing images", dynamic_ncols=True, unit="image")
     for i, f in pbar:
@@ -296,33 +308,26 @@ def predict(
                     metadata = metadata,
                     crops = crops,
                     mask_crops = True,
-                    identifier = UUID, #str(uuid.uuid4()),
+                    identifier = id,
                 )
-                if not result_directory is None:
-                    json_files = [f for f in glob.glob(os.path.join(glob.escape(metadata if isinstance(metadata, str) else result_directory), f"*{os.path.splitext(os.path.basename(f))[0]}*.json"))]
-                    assert len(json_files) == 1
-                    all_json_results.append(json_files[0])
-                if isVideo and overviews:
-                    if not result_directory is None:
-                        overview_file = glob.glob(os.path.join(result_directory, f"overview_*UUID_{UUID}.jpg"))
-                        if len(overview_file) == 1:
-                            overview_file = overview_file[0]
-                        elif len(overview_file) > 1:
-                            raise ValueError("Multiple overview files found.")
-                        elif len(overview_file) == 0:
-                            raise ValueError("No overview file found.")
-                        else:
-                            raise ValueError(f"Unexpected error. Found {len(overview_file)} overview files?")
-                    elif isinstance(overviews, str):
-                        overview_file = os.path.join(overviews, f"overview_{os.path.splitext(os.path.basename(f))[0]}_UUID_{UUID}.jpg")
-                    else:
-                        raise ValueError(f"Unexpected video inference settings. {result_directory=}, {overviews=}")
-                    frames.append(overview_file)
+                if result_directory is not None:
+                    basename = os.path.splitext(os.path.basename(f))[0]
+                    metadata_directory = metadata if isinstance(metadata, str) else result_directory
+                    overview_directory = overviews if isinstance(overviews, str) else result_directory
+                    # crop_directory = crops if isinstance(crops, str) else os.path.join(result_directory, crops)
+                    all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{id}.json'))
+                    if isVideo and overviews:
+                        frames.append(os.path.join(overview_directory, f"overview_{basename}_UUID_{id}.jpg"))
         except Exception as e:
             logger.error(f"Issue whilst processing {f}")
             #fixme, what is going on with /home/quentin/todo/toup/20221008_16-01-04-226084_raw_jpg.rf.0b8d397da3c47408694eeaab2cde06e5.jpg?
             logger.error(e)
             raise e
+    if verbose:
+        logger.info("Finalizing results...")
+    prediction_executor.flush(progress=True)
+    if verbose:
+        logger.info("All results finished.")
     if not no_compiled_coco:
         if len(all_json_results) == 0:
             logger.info("No results found, unable to compile COCO file.")
@@ -349,6 +354,8 @@ def predict(
         raise NotImplementedError("Multi-GPU support is not supported. Worker termination is not implemented.")
     if isERDA:
         io.stop()
+    if verbose:
+        logger.info("All steps done, process cleaning up.")
 
 def main():
     kwargs = cli_args()
