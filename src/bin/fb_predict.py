@@ -81,8 +81,8 @@ def cli_args():
                             help="Downscale the image before detection, but crops from the original image.")
     args_parse.add_argument("--single-scale", action="store_true", help="Use single scale.")
     args_parse.add_argument("-M", "--nms_metric", type=str, default=None, help="Overlap metric to use for NMS, if specified this will override the config. Default is 'IoU', currently only 'IoS' is also available.")
-    args_parse.add_argument("-g", "--gpu", type=str, default="cuda:0", help="Which device to use for inference. Default is 'cuda:0', i.e. the first GPU.")
-    args_parse.add_argument("-d", "--dtype", type=str, default="float16", help="Which dtype to use for inference. Default is 'float16'.")
+    args_parse.add_argument("-g", "--device", "--gpu", type=str, default="auto", help="Which device to use for inference.")
+    args_parse.add_argument("-d", "--dtype", type=str, default=None, help="Which dtype to use for inference. Default is 'float16' for CUDA and 'float32' for CPU.")
     args_parse.add_argument("-f", "--fast", action="store_true", help="Use fast mode.")
     args_parse.add_argument("--config", type=str, default=None, help="The config file.")
     args_parse.add_argument("--id", type=str, default=None, required=False, help="Identifier (ID) for prediction run.")
@@ -108,8 +108,8 @@ def predict(
         scale_before : float=1.0,
         single_scale : bool=False,
         nms_metric : str="IoU",
-        gpu : str="cuda:0",
-        dtype : str="float16",
+        device : str="auto",
+        dtype : str=None,
         fast : bool=False,
         config : Optional[str]=None,
         id : Optional[str]=None,
@@ -122,6 +122,9 @@ def predict(
         no_compiled_coco : bool=False,
         verbose : bool=False
     ):
+    if verbose:
+        set_log_level("DEBUG")
+    
     logger.debug("OPTIONS:", locals())
 
     # Sanitize paths
@@ -144,7 +147,14 @@ def predict(
             if not os.path.exists(input):
                 raise FileNotFoundError(f"Directory '{input}' not found.")
 
-    device = gpu
+    if device is None or device == "auto":
+        if torch.cuda.is_available():
+            device = "cuda:0"
+            logger.info("CUDA available, using GPU")
+        else:
+            device = "cpu"
+            logger.info("CUDA not available, using CPU")
+    
     if not torch.cuda.is_available() and "cuda" in device:
         raise ValueError(f"Device(s) '{device}' is/are not available.")
     # Detect if multi-gpu, either by comma or semicolon
@@ -158,7 +168,17 @@ def predict(
     else:
         device = f"cuda:{device}" if device.isdigit() else device
         device = torch.ones(1).to(torch.device(device)).device
-    
+    device_type = set([d.type for d in (device if isinstance(device, list) else [device])])
+    if len(device_type) != 1:
+        raise RuntimeError("Unable to resolve device type.")
+    device_type = list(device_type)[0].lower().strip()
+    if device_type not in ["cpu", "cuda"]:
+        logger.warning(f"Unsupported device type: {device_type} - unexpected behavior or crashes may arise.")
+    if dtype is None:
+        if device_type == "cpu":
+            dtype = "float32"
+        else:
+            dtype = "float16"
     dtype = dtype
     
     if config is not None:
@@ -193,11 +213,6 @@ def predict(
             crops = os.path.join(output_dir, "crops")
         if metadata:
             metadata = os.path.join(output_dir, "metadata")
-
-    verbose = verbose
-    if verbose:
-        config["TIME"] = True
-        set_log_level("DEBUG")
 
     pred = Predictor(model_weights, device=device, dtype=dtype, cfg=config)
 
@@ -353,7 +368,17 @@ def predict(
         logger.info("All steps done, process cleaning up.")
 
 def main():
-    predict(**cli_args())
+    kwargs = cli_args()
+    print(kwargs)
+    if kwargs.get('gpu', None) is not None:
+        logger.warning("'gpu' argument is deprecated!")
+        if kwargs.get("device", None) not in [None, "auto"]:
+            raise RuntimeError("Supplying both 'gpu' and 'device' is ambigous. Please use only one, preferably 'device'.")
+        kwargs["device"] = kwargs.pop("gpu")
+    else:
+        kwargs.pop("gpu", None)
+
+    predict(**kwargs)
 
 if __name__ == "__main__":
     main()

@@ -45,7 +45,7 @@ def download_from_repository(url : str, output_path : Optional[str]=None, strict
 # TODO: Improve this perhaps using https://gist.github.com/aldur/f356f245014523330a7070ab12bcfb1f, 
 # as I have done in PyRemoteData https://github.com/asgersvenning/pyremotedata/blob/f0e3506c1abe2bb20106ffa2a1c3fc0f380f3dd8/src/pyremotedata/__init__.py
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.WARNING, 
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
     datefmt='%Y-%m-%d %H:%M:%S'
 )
