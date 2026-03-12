@@ -185,6 +185,8 @@ def predict(
         config = read_cfg(config)
     else:
         config = DEFAULT_CFG
+    if verbose:
+        config["TIME"] = device_type == "cuda"
     if nms_metric is not None:
         config["OVERLAP_METRIC"] = nms_metric
     
