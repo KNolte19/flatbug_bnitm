@@ -125,7 +125,7 @@ def predict(
     if verbose:
         set_log_level("DEBUG")
     
-    logger.debug("OPTIONS:", locals())
+    logger.debug(f"OPTIONS: {locals()}")
 
     # Sanitize paths
     isVideo = False
@@ -330,11 +330,10 @@ def predict(
                     all_json_results.append(os.path.join(metadata_directory, f'metadata_{basename}_UUID_{id}.json'))
                     if isVideo and overviews:
                         frames.append(os.path.join(overview_directory, f"overview_{basename}_UUID_{id}.jpg"))
-        except Exception as e:
-            logger.error(f"Issue whilst processing {f}")
+        except Exception:
             #fixme, what is going on with /home/quentin/todo/toup/20221008_16-01-04-226084_raw_jpg.rf.0b8d397da3c47408694eeaab2cde06e5.jpg?
-            logger.error(e)
-            raise e
+            logger.exception(f"Issue whilst processing {f}")
+            raise
     if verbose:
         logger.info("Finalizing results...")
     prediction_executor.flush(progress=True)
@@ -371,7 +370,7 @@ def predict(
 
 def main():
     kwargs = cli_args()
-    print(kwargs)
+
     if kwargs.get('gpu', None) is not None:
         logger.warning("'gpu' argument is deprecated!")
         if kwargs.get("device", None) not in [None, "auto"]:
