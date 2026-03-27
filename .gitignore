@@ -198,8 +198,12 @@ install_digital_research_alliance_canada.sh
 pyvenv.cfg
 *.whl
 *.gz
+*.tmp
 
 !/prediction.jpg
 *.Rproj.user
 *.Rproj
 *.Rhistory
+
+.vscode
+*secrets*
