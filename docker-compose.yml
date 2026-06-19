@@ -2,9 +2,9 @@ services:
   flatbug:
     build: .
     ports:
-      - "8000:8000"
+      - "10002:10002"
     environment:
-      PORT: "8000"
+      PORT: "10002"
       UPLOAD_DIR: /tmp/uploads
       OUTPUT_DIR: /tmp/outputs
       MODEL_WEIGHTS: flat_bug_M.pt
