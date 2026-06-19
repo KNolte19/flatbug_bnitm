@@ -80,8 +80,8 @@ This repository now includes a Flask web app served by Gunicorn with Docker supp
 
 ```sh
 docker build -t flatbug-web .
-docker run --rm -p 8000:8000 \
-  -e PORT=8000 \
+docker run --rm -p 10002:10002 \
+  -e PORT=10002 \
   -e UPLOAD_DIR=/tmp/uploads \
   -e OUTPUT_DIR=/tmp/outputs \
   -e ENABLE_CLASSIFIER=false \
