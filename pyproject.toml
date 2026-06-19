@@ -22,7 +22,9 @@ dependencies = [
     "ultralytics>=8.2.16,<=8.3.124",
     "shapely>=2.0.2",
     "scikit-optimize>=0.10.1",
-    "scipy>=1.14.1"
+    "scipy>=1.14.1",
+    "Flask>=3.0.3",
+    "gunicorn>=23.0.0"
 ]
 keywords=['deep learning', 'object detection', 'instance segmentation', 'arthropods']
 

@@ -71,3 +71,47 @@ Find our documentation at [https://darsa.info/flat-bug/](https://darsa.info/flat
 #### Code
 
 #### Data -->
+
+## Flask Web App + Docker Runtime
+
+This repository now includes a Flask web app served by Gunicorn with Docker support.
+
+### Build and run with Docker
+
+```sh
+docker build -t flatbug-web .
+docker run --rm -p 8000:8000 \
+  -e PORT=8000 \
+  -e UPLOAD_DIR=/tmp/uploads \
+  -e OUTPUT_DIR=/tmp/outputs \
+  -e ENABLE_CLASSIFIER=false \
+  -e ENABLE_PERSISTENCE=false \
+  flatbug-web
+```
+
+Then open:
+- `http://localhost:8000/`
+
+### Environment variables
+
+- `PORT` (default: `8000`) — Gunicorn bind port (`0.0.0.0:${PORT}`)
+- `UPLOAD_DIR` (default: `/tmp/uploads`) — uploaded image storage
+- `OUTPUT_DIR` (default: `/tmp/outputs`) — inference output storage
+- `MAX_CONTENT_LENGTH` (optional) — max upload size in bytes
+- `ENABLE_CLASSIFIER` (default: `false`) — reserved CNN classifier hook toggle
+- `ENABLE_PERSISTENCE` (default: `false`) — reserved persistence hook toggle (filesystem metadata when enabled)
+
+### Routes
+
+- `GET /` — upload form
+- `POST /` — upload + inference trigger
+- `GET /predictions` — latest prediction overview, metadata, visual outputs
+- `GET /predictions/<prediction_id>/artifact/<artifact_path>` — render artifact
+- `GET /predictions/<prediction_id>/download/<artifact_path>` — download artifact
+- `GET /predictions/<prediction_id>/upload` — render uploaded image
+
+### Current limitations
+
+- No database integration or migrations are implemented yet.
+- CNN classifier integration is not implemented yet (`ClassifierService` is a no-op by default).
+- Persistence uses in-memory metadata by default; optional filesystem metadata index is available when `ENABLE_PERSISTENCE=true`.
