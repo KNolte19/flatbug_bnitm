@@ -2,15 +2,117 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>flatbug upload</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>flatbug – insect detection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
   <body>
-    <h1>flatbug inference</h1>
-    <form action="/" method="post" enctype="multipart/form-data">
-      <label for="image">Select image:</label>
-      <input id="image" type="file" name="image" accept="image/*" required />
-      <button type="submit">Run inference</button>
-    </form>
-    <p><a href="/predictions">View latest prediction</a></p>
+    <header class="site-header">
+      <span class="logo">🐛 flatbug</span>
+      <span class="tagline">Automated insect detection &amp; classification</span>
+    </header>
+
+    <main class="main-content">
+      <div class="card">
+        <h1>Run inference</h1>
+        <p class="subtitle">Upload a flat-bug image to detect and count insects.</p>
+
+        <div class="warning-box">
+          ⚠️ Only <strong>JPG</strong> and <strong>PNG</strong> images are supported.
+        </div>
+
+        <div id="type-error" class="type-error-msg">
+          ❌ Unsupported file type. Please select a <strong>.jpg</strong> or <strong>.png</strong> image.
+        </div>
+
+        <form id="upload-form" action="/" method="post" enctype="multipart/form-data" novalidate>
+          <div class="drop-zone" id="drop-zone">
+            <div class="drop-icon">📂</div>
+            <div class="drop-label">
+              <strong>Click to browse</strong> or drag &amp; drop your image here
+            </div>
+            <div class="file-name" id="file-name"></div>
+            <input id="image" type="file" name="image" accept=".jpg,.jpeg,.png" required />
+          </div>
+
+          <button type="submit" class="btn-primary" id="submit-btn">🔍 Run inference</button>
+        </form>
+
+        <a href="/predictions" class="nav-link">📊 View latest prediction</a>
+      </div>
+    </main>
+
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+      <div class="loading-card">
+        <p>⏳ Processing your image…</p>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill"></div>
+        </div>
+        <p class="hint">Detection may take up to a minute depending on image size.</p>
+      </div>
+    </div>
+
+    <footer class="site-footer">flatbug · BNITM insect detection</footer>
+
+    <script>
+      const form = document.getElementById('upload-form');
+      const input = document.getElementById('image');
+      const fileNameEl = document.getElementById('file-name');
+      const dropZone = document.getElementById('drop-zone');
+      const overlay = document.getElementById('loading-overlay');
+      const submitBtn = document.getElementById('submit-btn');
+      const typeError = document.getElementById('type-error');
+
+      const ALLOWED = ['image/jpeg', 'image/png', 'image/jpg'];
+      const ALLOWED_EXT = ['.jpg', '.jpeg', '.png'];
+
+      function isAllowed(file) {
+        if (ALLOWED.includes(file.type)) return true;
+        const name = file.name.toLowerCase();
+        return ALLOWED_EXT.some(ext => name.endsWith(ext));
+      }
+
+      function setFile(file) {
+        if (!isAllowed(file)) {
+          typeError.style.display = 'flex';
+          fileNameEl.textContent = '';
+          submitBtn.disabled = true;
+          return false;
+        }
+        typeError.style.display = 'none';
+        fileNameEl.textContent = '✅ ' + file.name;
+        submitBtn.disabled = false;
+        return true;
+      }
+
+      input.addEventListener('change', () => {
+        if (input.files.length) setFile(input.files[0]);
+      });
+
+      // Drag-and-drop
+      dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+      dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file && setFile(file)) {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          input.files = dt.files;
+        }
+      });
+
+      form.addEventListener('submit', e => {
+        if (!input.files.length || !isAllowed(input.files[0])) {
+          e.preventDefault();
+          typeError.style.display = 'flex';
+          return;
+        }
+        submitBtn.disabled = true;
+        overlay.classList.add('active');
+      });
+    </script>
   </body>
 </html>

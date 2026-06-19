@@ -1,0 +1,13 @@
+services:
+  flatbug:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      UPLOAD_DIR: /tmp/uploads
+      OUTPUT_DIR: /tmp/outputs
+      MODEL_WEIGHTS: flat_bug_M.pt
+      ENABLE_CLASSIFIER: "false"
+      ENABLE_PERSISTENCE: "false"
+    restart: unless-stopped

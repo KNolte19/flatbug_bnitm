@@ -2,11 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>flatbug error</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>flatbug – error</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
   <body>
-    <h1>Error</h1>
-    <p>{{ message }}</p>
-    <p><a href="/">Back to upload</a></p>
+    <header class="site-header">
+      <span class="logo">🐛 flatbug</span>
+      <span class="tagline">Automated insect detection &amp; classification</span>
+    </header>
+
+    <main class="main-content">
+      <div class="card error-card">
+        <div class="error-icon">⚠️</div>
+        <h1>Something went wrong</h1>
+        <p>{{ message }}</p>
+        <a href="/" class="btn-primary btn-back">
+          ⬅ Back to upload
+        </a>
+      </div>
+    </main>
+
+    <footer class="site-footer">flatbug · BNITM insect detection</footer>
   </body>
 </html>
