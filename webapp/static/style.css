@@ -345,6 +345,15 @@ body {
   margin-bottom: 1.5rem;
 }
 
+/* ── Back button (inline-width variant of btn-primary) ── */
+.btn-back {
+  text-decoration: none;
+  text-align: center;
+  display: inline-block;
+  width: auto;
+  padding: 0.7rem 2rem;
+}
+
 /* ── Footer ── */
 .site-footer {
   text-align: center;
