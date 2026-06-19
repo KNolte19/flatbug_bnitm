@@ -12,9 +12,10 @@ from webapp.services.classifier import ClassifierService
 
 
 class InferenceService:
-    def __init__(self, output_dir: str, classifier_service: ClassifierService) -> None:
+    def __init__(self, output_dir: str, classifier_service: ClassifierService, model_weights: str = "flat_bug_M.pt") -> None:
         self.output_dir = Path(output_dir)
         self.classifier_service = classifier_service
+        self.model_weights = model_weights
 
     def run_inference(self, upload_path: str) -> dict[str, Any]:
         prediction_id = str(uuid4())
@@ -24,7 +25,7 @@ class InferenceService:
         predict(
             input=upload_path,
             output_dir=str(job_output_dir),
-            model_weights="flat_bug_M.pt",
+            model_weights=self.model_weights,
             id=prediction_id,
             no_compiled_coco=False,
             verbose=False,
@@ -36,7 +37,7 @@ class InferenceService:
             if path.is_file()
         )
 
-        metadata_artifact = next((a for a in artifacts if a.endswith(".json") and "metadata_" in Path(a).name), None)
+        metadata_artifact = next((a for a in artifacts if a.endswith(".json") and Path(a).name.startswith("metadata_")), None)
         overview_artifacts = [a for a in artifacts if Path(a).name.startswith("overview_") and a.endswith(".jpg")]
         crop_artifacts = [a for a in artifacts if Path(a).name.startswith("crop_")]
         compiled_coco_artifact = next((a for a in artifacts if Path(a).name == "coco_instances.json"), None)
@@ -56,7 +57,9 @@ class InferenceService:
             }
 
         # Future CNN hook: pass extracted segment data once classifier integration is enabled.
-        classifier_results = self.classifier_service.classify_segments([])
+        classifier_results = []
+        if getattr(self.classifier_service, "enabled", False):
+            classifier_results = self.classifier_service.classify_segments([])
 
         return {
             "prediction_id": prediction_id,

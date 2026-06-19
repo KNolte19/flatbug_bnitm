@@ -5,6 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     UPLOAD_DIR=/tmp/uploads \
     OUTPUT_DIR=/tmp/outputs \
+    MODEL_WEIGHTS=flat_bug_M.pt \
     ENABLE_CLASSIFIER=false \
     ENABLE_PERSISTENCE=false
 
@@ -19,4 +20,4 @@ RUN pip install --no-cache-dir -e .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8000} webapp.wsgi:app"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "webapp.wsgi:app"]

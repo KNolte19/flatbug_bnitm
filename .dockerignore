@@ -13,3 +13,9 @@ __pycache__/
 docs/build/
 *.ipynb_checkpoints
 model_snapshots/
+docs/
+examples/
+scripts/
+prototypes/
+utils/
+src/flat_bug/tests/

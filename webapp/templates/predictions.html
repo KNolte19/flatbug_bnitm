@@ -17,8 +17,12 @@
 
       <h2>Metadata</h2>
       <ul>
-        <li>Detections: {{ prediction.metadata_summary.get('detections', 'n/a') }}</li>
-        <li>Max confidence: {{ prediction.metadata_summary.get('max_confidence', 'n/a') }}</li>
+        <li>Detections: {{ prediction.metadata_summary.get('detections', 0) }}</li>
+        <li>
+          Max confidence:
+          {% set max_conf = prediction.metadata_summary.get('max_confidence') %}
+          {{ max_conf if max_conf is not none else 'No detections' }}
+        </li>
         <li>Image size: {{ prediction.metadata_summary.get('image_width', 'n/a') }} x {{ prediction.metadata_summary.get('image_height', 'n/a') }}</li>
       </ul>
 

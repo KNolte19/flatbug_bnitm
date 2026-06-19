@@ -51,8 +51,9 @@ def upload_and_predict():
 
     try:
         prediction = inference_service.run_inference(str(upload_path))
-    except Exception as exc:
-        return render_template("error.html", message=f"Inference failed: {exc}"), 500
+    except (FileNotFoundError, RuntimeError, ValueError, OSError):
+        current_app.logger.exception("Inference failed for upload %s", upload_id)
+        return render_template("error.html", message="Inference failed. Please try again."), 500
 
     prediction["filename"] = safe_name
     repository.save_prediction(prediction)

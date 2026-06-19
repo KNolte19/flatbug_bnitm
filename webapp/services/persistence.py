@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from abc import ABC, abstractmethod
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +44,7 @@ class InMemoryPredictionRepository(PredictionRepository):
 
     def list_predictions(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
-            return list(reversed(self._predictions))[:limit]
+            return list(islice(reversed(self._predictions), limit))
 
     def get_prediction(self, prediction_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -62,8 +63,11 @@ class FileSystemPredictionRepository(PredictionRepository):
     def _read_state(self) -> dict[str, list[dict[str, Any]]]:
         if not self._index_path.exists():
             return {"uploads": [], "predictions": []}
-        with self._index_path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with self._index_path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {"uploads": [], "predictions": []}
 
     def _write_state(self, state: dict[str, list[dict[str, Any]]]) -> None:
         with self._index_path.open("w", encoding="utf-8") as f:
@@ -87,7 +91,7 @@ class FileSystemPredictionRepository(PredictionRepository):
         with self._lock:
             state = self._read_state()
             predictions = state.get("predictions", [])
-            return list(reversed(predictions))[:limit]
+            return list(islice(reversed(predictions), limit))
 
     def get_prediction(self, prediction_id: str) -> dict[str, Any] | None:
         with self._lock:

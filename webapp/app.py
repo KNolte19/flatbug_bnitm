@@ -25,7 +25,11 @@ def create_app() -> Flask:
         repository = InMemoryPredictionRepository()
 
     classifier_service = NoOpClassifierService(enabled=app.config["ENABLE_CLASSIFIER"])
-    inference_service = InferenceService(app.config["OUTPUT_DIR"], classifier_service)
+    inference_service = InferenceService(
+        app.config["OUTPUT_DIR"],
+        classifier_service,
+        model_weights=app.config["MODEL_WEIGHTS"],
+    )
 
     app.extensions["prediction_repository"] = repository
     app.extensions["classifier_service"] = classifier_service

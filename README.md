@@ -98,6 +98,7 @@ Then open:
 - `UPLOAD_DIR` (default: `/tmp/uploads`) — uploaded image storage
 - `OUTPUT_DIR` (default: `/tmp/outputs`) — inference output storage
 - `MAX_CONTENT_LENGTH` (optional) — max upload size in bytes
+- `MODEL_WEIGHTS` (default: `flat_bug_M.pt`) — model weights path passed to inference
 - `ENABLE_CLASSIFIER` (default: `false`) — reserved CNN classifier hook toggle
 - `ENABLE_PERSISTENCE` (default: `false`) — reserved persistence hook toggle (filesystem metadata when enabled)
 

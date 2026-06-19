@@ -24,8 +24,12 @@ def _resolve_artifact(prediction: dict, artifact_path: str) -> Path:
     allowed = set(prediction.get("artifacts", []))
     if artifact_path not in allowed:
         abort(404)
-    output_dir = Path(prediction["output_dir"])
-    full_path = output_dir / artifact_path
+    output_dir = Path(prediction["output_dir"]).resolve()
+    full_path = (output_dir / artifact_path).resolve()
+    try:
+        full_path.relative_to(output_dir)
+    except ValueError:
+        abort(404)
     if not full_path.exists() or not full_path.is_file():
         abort(404)
     return full_path
@@ -70,7 +74,12 @@ def get_uploaded_image(prediction_id: str):
     prediction = _get_prediction(prediction_id)
     if prediction is None:
         abort(404)
-    upload_path = Path(prediction["upload_path"])
+    upload_dir = Path(current_app.config["UPLOAD_DIR"]).resolve()
+    upload_path = Path(prediction["upload_path"]).resolve()
+    try:
+        upload_path.relative_to(upload_dir)
+    except ValueError:
+        abort(404)
     if not upload_path.exists() or not upload_path.is_file():
         abort(404)
     return send_file(upload_path)

@@ -12,7 +12,12 @@ class Config:
     PORT = int(os.getenv("PORT", "8000"))
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/tmp/uploads")
     OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/tmp/outputs")
-    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH")) if os.getenv("MAX_CONTENT_LENGTH") else None
+    MODEL_WEIGHTS = os.getenv("MODEL_WEIGHTS", "flat_bug_M.pt")
+    _MAX_CONTENT_LENGTH_RAW = os.getenv("MAX_CONTENT_LENGTH")
+    try:
+        MAX_CONTENT_LENGTH = int(_MAX_CONTENT_LENGTH_RAW) if _MAX_CONTENT_LENGTH_RAW else None
+    except ValueError:
+        MAX_CONTENT_LENGTH = None
     ENABLE_CLASSIFIER = _get_bool("ENABLE_CLASSIFIER", False)
     ENABLE_PERSISTENCE = _get_bool("ENABLE_PERSISTENCE", False)
     ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "bmp", "tif", "tiff", "webp"}
