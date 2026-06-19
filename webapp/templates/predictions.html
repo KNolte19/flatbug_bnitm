@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>flatbug predictions</title>
+  </head>
+  <body>
+    <h1>Prediction outputs</h1>
+
+    {% if not prediction %}
+      <p>No predictions available yet.</p>
+      <p><a href="/">Go to upload</a></p>
+    {% else %}
+      <p><strong>Prediction ID:</strong> {{ prediction.prediction_id }}</p>
+      <p><strong>Filename:</strong> {{ prediction.filename }}</p>
+      <p><strong>Created:</strong> {{ prediction.created_at }}</p>
+
+      <h2>Metadata</h2>
+      <ul>
+        <li>Detections: {{ prediction.metadata_summary.get('detections', 0) }}</li>
+        <li>
+          Max confidence:
+          {% set max_conf = prediction.metadata_summary.get('max_confidence') %}
+          {{ max_conf if max_conf is not none else 'No detections' }}
+        </li>
+        <li>Image size: {{ prediction.metadata_summary.get('image_width', 'n/a') }} x {{ prediction.metadata_summary.get('image_height', 'n/a') }}</li>
+      </ul>
+
+      <h2>Uploaded image</h2>
+      <img src="{{ url_for('predictions.get_uploaded_image', prediction_id=prediction.prediction_id) }}" alt="Uploaded image" style="max-width: 600px;" />
+
+      <h2>Generated image artifacts</h2>
+      {% if image_artifacts %}
+        {% for artifact in image_artifacts %}
+          <div style="margin-bottom: 20px;">
+            <p>{{ artifact }}</p>
+            <img src="{{ url_for('predictions.get_artifact', prediction_id=prediction.prediction_id, artifact_path=artifact) }}" alt="{{ artifact }}" style="max-width: 600px;" />
+          </div>
+        {% endfor %}
+      {% else %}
+        <p>No image artifacts found.</p>
+      {% endif %}
+
+      <h2>Downloads</h2>
+      <ul>
+        {% for artifact in artifacts %}
+          <li>
+            <a href="{{ url_for('predictions.download_artifact', prediction_id=prediction.prediction_id, artifact_path=artifact) }}">Download {{ artifact }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </body>
+</html>
