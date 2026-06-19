@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=8000 \
+    PORT=10002 \
     UPLOAD_DIR=/tmp/uploads \
     OUTPUT_DIR=/tmp/outputs \
     MODEL_WEIGHTS=flat_bug_M.pt \
@@ -18,6 +18,6 @@ RUN apt-get update \
 COPY . .
 RUN pip install --no-cache-dir -e .
 
-EXPOSE 8000
+EXPOSE 10002
 
 CMD ["gunicorn", "-c", "gunicorn.conf.py", "webapp.wsgi:app"]

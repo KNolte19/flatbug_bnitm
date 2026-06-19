@@ -90,11 +90,11 @@ docker run --rm -p 10002:10002 \
 ```
 
 Then open:
-- `http://localhost:8000/`
+- `http://localhost:10002/`
 
 ### Environment variables
 
-- `PORT` (default: `8000`) — Gunicorn bind port (`0.0.0.0:${PORT}`)
+- `PORT` (default: `10002`) — Gunicorn bind port (`0.0.0.0:${PORT}`)
 - `UPLOAD_DIR` (default: `/tmp/uploads`) — uploaded image storage
 - `OUTPUT_DIR` (default: `/tmp/outputs`) — inference output storage
 - `MAX_CONTENT_LENGTH` (optional) — max upload size in bytes
