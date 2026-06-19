@@ -2,53 +2,112 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>flatbug predictions</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>flatbug – predictions</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
   <body>
-    <h1>Prediction outputs</h1>
+    <header class="site-header">
+      <span class="logo">🐛 flatbug</span>
+      <span class="tagline">Automated insect detection &amp; classification</span>
+    </header>
 
-    {% if not prediction %}
-      <p>No predictions available yet.</p>
-      <p><a href="/">Go to upload</a></p>
-    {% else %}
-      <p><strong>Prediction ID:</strong> {{ prediction.prediction_id }}</p>
-      <p><strong>Filename:</strong> {{ prediction.filename }}</p>
-      <p><strong>Created:</strong> {{ prediction.created_at }}</p>
+    <main class="main-content">
+      <div class="card" style="max-width: 720px;">
 
-      <h2>Metadata</h2>
-      <ul>
-        <li>Detections: {{ prediction.metadata_summary.get('detections', 0) }}</li>
-        <li>
-          Max confidence:
-          {% set max_conf = prediction.metadata_summary.get('max_confidence') %}
-          {{ max_conf if max_conf is not none else 'No detections' }}
-        </li>
-        <li>Image size: {{ prediction.metadata_summary.get('image_width', 'n/a') }} x {{ prediction.metadata_summary.get('image_height', 'n/a') }}</li>
-      </ul>
+        {% if not prediction %}
+          <h1>Prediction outputs</h1>
+          <p style="color: var(--text-muted); margin: 1.5rem 0;">No predictions available yet.</p>
+          <a href="/" class="nav-link">⬅ Go to upload</a>
+        {% else %}
+          <h1>Prediction results</h1>
+          <p class="subtitle">Detection complete — review the results below.</p>
 
-      <h2>Uploaded image</h2>
-      <img src="{{ url_for('predictions.get_uploaded_image', prediction_id=prediction.prediction_id) }}" alt="Uploaded image" style="max-width: 600px;" />
+          <div class="predictions-grid">
 
-      <h2>Generated image artifacts</h2>
-      {% if image_artifacts %}
-        {% for artifact in image_artifacts %}
-          <div style="margin-bottom: 20px;">
-            <p>{{ artifact }}</p>
-            <img src="{{ url_for('predictions.get_artifact', prediction_id=prediction.prediction_id, artifact_path=artifact) }}" alt="{{ artifact }}" style="max-width: 600px;" />
-          </div>
-        {% endfor %}
-      {% else %}
-        <p>No image artifacts found.</p>
-      {% endif %}
+            <div>
+              <p class="section-title">Summary</p>
+              <table class="meta-table">
+                <tr>
+                  <th>Prediction ID</th>
+                  <td>{{ prediction.prediction_id }}</td>
+                </tr>
+                <tr>
+                  <th>Filename</th>
+                  <td>{{ prediction.filename }}</td>
+                </tr>
+                <tr>
+                  <th>Created</th>
+                  <td>{{ prediction.created_at }}</td>
+                </tr>
+                <tr>
+                  <th>Detections</th>
+                  <td>{{ prediction.metadata_summary.get('detections', 0) }}</td>
+                </tr>
+                <tr>
+                  <th>Max confidence</th>
+                  <td>
+                    {% set max_conf = prediction.metadata_summary.get('max_confidence') %}
+                    {{ max_conf if max_conf is not none else 'No detections' }}
+                  </td>
+                </tr>
+                <tr>
+                  <th>Image size</th>
+                  <td>
+                    {{ prediction.metadata_summary.get('image_width', 'n/a') }} ×
+                    {{ prediction.metadata_summary.get('image_height', 'n/a') }} px
+                  </td>
+                </tr>
+              </table>
+            </div>
 
-      <h2>Downloads</h2>
-      <ul>
-        {% for artifact in artifacts %}
-          <li>
-            <a href="{{ url_for('predictions.download_artifact', prediction_id=prediction.prediction_id, artifact_path=artifact) }}">Download {{ artifact }}</a>
-          </li>
-        {% endfor %}
-      </ul>
-    {% endif %}
+            <div>
+              <p class="section-title">Uploaded image</p>
+              <img
+                class="artifact-img"
+                src="{{ url_for('predictions.get_uploaded_image', prediction_id=prediction.prediction_id) }}"
+                alt="Uploaded image"
+              />
+            </div>
+
+            {% if image_artifacts %}
+              <div>
+                <p class="section-title">Detection output</p>
+                {% for artifact in image_artifacts %}
+                  <div style="margin-bottom: 1rem;">
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.3rem;">{{ artifact }}</p>
+                    <img
+                      class="artifact-img"
+                      src="{{ url_for('predictions.get_artifact', prediction_id=prediction.prediction_id, artifact_path=artifact) }}"
+                      alt="{{ artifact }}"
+                    />
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            {% if artifacts %}
+              <div>
+                <p class="section-title">Downloads</p>
+                <ul class="download-list">
+                  {% for artifact in artifacts %}
+                    <li>
+                      <a href="{{ url_for('predictions.download_artifact', prediction_id=prediction.prediction_id, artifact_path=artifact) }}">
+                        ⬇ {{ artifact }}
+                      </a>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+
+          </div><!-- /grid -->
+
+          <a href="/" class="nav-link">⬅ Run another inference</a>
+        {% endif %}
+      </div>
+    </main>
+
+    <footer class="site-footer">flatbug · BNITM insect detection</footer>
   </body>
 </html>

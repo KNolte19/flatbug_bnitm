@@ -20,4 +20,4 @@ class Config:
         MAX_CONTENT_LENGTH = None
     ENABLE_CLASSIFIER = _get_bool("ENABLE_CLASSIFIER", False)
     ENABLE_PERSISTENCE = _get_bool("ENABLE_PERSISTENCE", False)
-    ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "bmp", "tif", "tiff", "webp"}
+    ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
